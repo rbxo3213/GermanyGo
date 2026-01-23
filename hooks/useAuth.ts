@@ -23,7 +23,7 @@ export function useAuth() {
         return () => unsubscribe();
     }, []);
 
-    const signup = async (email, password) => {
+    const signup = async (email: string, password: string, nickname: string) => {
         setError(null);
         let createdUser: User | null = null;
 
@@ -47,9 +47,19 @@ export function useAuth() {
                     }
                     transaction.update(statsRef, { user_count: currentCount + 1 });
                 }
+
+                // 3. Create User Profile in 'users' collection
+                const userRef = doc(db, "users", createdUser!.uid);
+                transaction.set(userRef, {
+                    uid: createdUser!.uid,
+                    email: email,
+                    nickname: nickname,
+                    createdAt: new Date(), // using serverTimestamp() inside transaction can be tricky, Date is fine for now or import serverTimestamp
+                    role: 'member'
+                });
             });
 
-            // 3. Send Verification Email
+            // 4. Send Verification Email
             await sendEmailVerification(createdUser);
             return createdUser;
 
@@ -80,7 +90,7 @@ export function useAuth() {
         }
     };
 
-    const login = (email, password) => {
+    const login = (email: string, password: string) => {
         return signInWithEmailAndPassword(auth, email, password);
     };
 

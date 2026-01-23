@@ -1,0 +1,13 @@
+.leaflet-container {
+    width: 100%;
+    height: 100%;
+    border-radius: 1.5rem;
+    /* rounded-3xl */
+    z-index: 10;
+}
+
+/* Custom Marker Fix (standard leaflet marker sometimes needs this in React) */
+.leaflet-div-icon {
+    background: transparent;
+    border: none;
+}

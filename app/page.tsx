@@ -1,29 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import MemoPad from "../components/MemoPad";
-import ItineraryTabs from "../components/ItineraryTabs";
-import TransportComparison from "../components/TransportComparison";
-import CityGuide from "../components/CityGuide";
+import { useState } from "react";
+import dynamic from "next/dynamic";
+import BottomNav from "../components/BottomNav";
+import TabSkeleton from "../components/TabSkeleton";
 import LoginModal from "../components/LoginModal";
-import AIOptimizer from "../components/AIOptimizer";
 import { useAuth } from "../hooks/useAuth";
+import { AnimatePresence } from "framer-motion";
+import { MessageSquare, Users, LogOut } from "lucide-react";
+
+// Async Components (Lazy Load)
+const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
+const ItineraryTabs = dynamic(() => import("../components/ItineraryTabs"), { loading: () => <TabSkeleton /> });
+const TransportComparison = dynamic(() => import("../components/TransportComparison"), { loading: () => <TabSkeleton /> });
+const CityGuide = dynamic(() => import("../components/CityGuide"), { loading: () => <TabSkeleton /> });
+const LBSDiscovery = dynamic(() => import("../components/LBSDiscovery"), { loading: () => <TabSkeleton />, ssr: false });
+const AIOptimizer = dynamic(() => import("../components/AIOptimizer"), { ssr: false });
+const GroupChat = dynamic(() => import("../components/GroupChat"), { ssr: false });
+const MemberInfo = dynamic(() => import("../components/MemberInfo"), { ssr: false });
+
+type Tab = "guide" | "memo" | "itinerary" | "transport" | "map";
 
 export default function Home() {
     const { user, loading } = useAuth();
+    const [activeTab, setActiveTab] = useState<Tab>("guide");
     const [activeLeg, setActiveLeg] = useState("leg1");
 
-    // Mock LBS Logic
-    const [geoStatus, setGeoStatus] = useState("위치 확인 중...");
-    const [nicheSpots, setNicheSpots] = useState<any[]>([]);
-
-    useEffect(() => {
-        // Basic mock for LBS
-        setNicheSpots([
-            { name: "Hidden Kebab", rating: 4.8, reviews: 42, dist: "0.4km" },
-            { name: "Cafe Einstein", rating: 4.9, reviews: 88, dist: "1.2km" },
-        ]);
-    }, []);
+    // Modals
+    const [showChat, setShowChat] = useState(false);
+    const [showMembers, setShowMembers] = useState(false);
 
     // 1. Loading State
     if (loading) {
@@ -41,7 +46,6 @@ export default function Home() {
     if (!user) {
         return (
             <div className="min-h-screen bg-slate-50 relative overflow-hidden">
-                {/* Background Pattern */}
                 <div className="absolute inset-0 z-0 opacity-10" style={{
                     backgroundImage: "radial-gradient(#444 1px, transparent 1px)",
                     backgroundSize: "20px 20px"
@@ -51,105 +55,108 @@ export default function Home() {
         );
     }
 
-    // 3. Logged In BUT Email Not Verified -> Show Verification Blocker
+    // 3. Logged In BUT Email Not Verified
     if (user && !user.emailVerified) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
                 <div className="max-w-md w-full bg-white rounded-[2rem] shadow-2xl p-8 text-center relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-2 bg-yellow-400"></div>
-                    <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <span className="text-3xl">✉️</span>
-                    </div>
                     <h2 className="text-2xl font-bold mb-2">이메일 인증이 필요합니다</h2>
                     <p className="text-gray-500 mb-6 word-keep-all">
-                        <span className="font-bold text-slate-800">{user.email}</span>로 인증 메일을 발송했습니다.<br />
-                        메일함 확인 후 링크를 클릭해 주세요.
+                        <span className="font-bold text-slate-800">{user.email}</span>로 인증 메일을 발송했습니다.
                     </p>
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="w-full bg-black text-white font-bold py-4 rounded-2xl hover:bg-gray-800 transition-colors"
-                    >
+                    <button onClick={() => window.location.reload()} className="w-full bg-black text-white font-bold py-4 rounded-2xl">
                         인증 완료 (새로고침)
                     </button>
-                    <p className="text-xs text-gray-400 mt-4">
-                        메일이 오지 않았나요? 스팸함을 확인하거나<br />
-                        <button onClick={() => alert("재발송 기능은 현재 준비중입니다. 잠시 후 다시 시도해주세요.")} className="underline">여기</button>를 눌러 재발송하세요.
-                    </p>
                 </div>
             </div>
         );
     }
 
-    // 4. Authenticated & Verified Dashboard
+    // 4. Authenticated & Verified Dashboard (Tabbed)
     return (
         <main className="min-h-screen bg-slate-50 text-black font-sans pb-32">
-            {/* Header Hero */}
-            <header className="bg-white border-b border-gray-100 p-6 pt-12 sticky top-0 z-50 bg-opacity-90 backdrop-blur-md">
-                <div className="max-w-4xl mx-auto flex justify-between items-end">
-                    <div>
-                        <h1 className="text-3xl font-extrabold tracking-tight">
-                            Germa-Niche <span className="text-blue-600">2026</span>
-                        </h1>
-                        <p className="text-gray-500 text-sm font-medium mt-1">2026.02.06 — 02.16 (3인 그룹)</p>
+            {/* Mobile Header (German Theme) */}
+            <header className="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-4 border-b border-gray-100 flex justify-between items-center shadow-sm">
+                <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-1">
+                    🇩🇪 Germa-Niche
+                </h1>
+                <div className="flex items-center gap-3">
+                    <div className="text-[10px] font-bold bg-black text-[#FFCE00] px-3 py-1 rounded-full border border-gray-800 mr-2">
+                        D-14
                     </div>
-                    <div className="text-right hidden sm:block">
-                        <span className="bg-black text-white px-3 py-1 rounded-full text-xs font-bold">D-DAY Calculator</span>
-                    </div>
+                    {/* Header Icons */}
+                    <button onClick={() => setShowMembers(true)} className="text-gray-800 hover:text-black transition-all">
+                        <Users size={22} strokeWidth={2.5} />
+                    </button>
+                    <button onClick={() => setShowChat(true)} className="text-gray-800 hover:text-black transition-all relative">
+                        <MessageSquare size={22} strokeWidth={2.5} />
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#DD0000] rounded-full border-2 border-white"></span>
+                    </button>
+                    <button
+                        onClick={() => import("../firebase").then(m => m.auth.signOut())}
+                        className="text-gray-300 hover:text-red-500 transition-colors ml-1"
+                    >
+                        <LogOut size={20} />
+                    </button>
                 </div>
             </header>
 
-            <div className="max-w-4xl mx-auto px-4 space-y-12 mt-8">
+            {/* Dynamic Content Area */}
+            <div className="max-w-md mx-auto px-4 mt-6">
 
-                {/* Context-Aware City Guide (Replaces Static TravelTips) */}
-                <section>
-                    <CityGuide activeLeg={activeLeg} />
-                </section>
-
-                {/* Detailed Itinerary (Tabs) */}
-                <section>
-                    <ItineraryTabs activeTab={activeLeg} onTabChange={setActiveLeg} />
-                </section>
-
-                {/* Transport Comparison */}
-                <section>
-                    <TransportComparison />
-                </section>
-
-                {/* Dashboard (MemoPad) */}
-                <section>
-                    <div className="mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800 px-2">나만의 여행 메모</h2>
-                        <p className="text-gray-500 px-2 text-sm">잊지 말아야 할 것들을 기록하세요.</p>
+                {/* GUIDE TAB */}
+                {activeTab === "guide" && (
+                    <div className="space-y-8 animate-fadeIn">
+                        <section>
+                            <CityGuide activeLeg={activeLeg} />
+                        </section>
                     </div>
-                    <MemoPad />
-                </section>
+                )}
 
-                {/* LBS Discovery (Hidden Gems) */}
-                <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-                    <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <span>내 주변 숨은 맛집</span>
-                        <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-bold">평점 4.5+</span>
-                    </h2>
-                    <div className="space-y-4">
-                        {nicheSpots.map((spot, i) => (
-                            <div key={i} className="flex justify-between items-center p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
-                                <div>
-                                    <h3 className="font-bold">{spot.name}</h3>
-                                    <p className="text-xs text-gray-400">{spot.dist} 거리</p>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                    <span className="text-yellow-400">★</span>
-                                    <span className="font-bold text-slate-800">{spot.rating}</span>
-                                    <span className="text-xs text-gray-400">({spot.reviews})</span>
-                                </div>
-                            </div>
-                        ))}
+                {/* MEMO TAB */}
+                {activeTab === "memo" && (
+                    <div className="animate-fadeIn">
+                        <div className="mb-4">
+                            <h2 className="text-xl font-bold text-slate-800">Quick Memo</h2>
+                            <p className="text-sm text-gray-400">잊기 쉬운 아이디어를 기록하세요</p>
+                        </div>
+                        <MemoPad />
                     </div>
-                </section>
+                )}
 
+                {/* ITINERARY TAB */}
+                {activeTab === "itinerary" && (
+                    <div className="animate-fadeIn">
+                        <ItineraryTabs activeTab={activeLeg} onTabChange={setActiveLeg} />
+                    </div>
+                )}
+
+                {/* TRANSPORT TAB */}
+                {activeTab === "transport" && (
+                    <div className="animate-fadeIn">
+                        <TransportComparison />
+                    </div>
+                )}
+
+                {/* MAP TAB */}
+                {activeTab === "map" && (
+                    <div className="animate-fadeIn">
+                        <LBSDiscovery />
+                    </div>
+                )}
             </div>
 
             <AIOptimizer />
+
+            {/* Modals */}
+            <AnimatePresence>
+                {showChat && <GroupChat onClose={() => setShowChat(false)} />}
+                {showMembers && <MemberInfo onClose={() => setShowMembers(false)} />}
+            </AnimatePresence>
+
+            {/* Bottom Navigation */}
+            <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
         </main>
     );
 }

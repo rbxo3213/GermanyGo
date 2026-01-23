@@ -34,20 +34,19 @@ export default function MemoPad() {
     const [inputText, setInputText] = useState("");
     const [isAdding, setIsAdding] = useState(false);
 
-    // Real-time Firestore Subscription
+    // Real-time Firestore Subscription with LocalStorage Backup
     useEffect(() => {
-        // If you want strict privacy, filter by userId: where("userId", "==", user?.uid)
-        // For a group trip, maybe we want shared memos? Let's assume SHARED for now as it's a "Group Trip".
-        // Or we can add a 'type' field later. For now, let's show ALL memos for the group to see.
-
-        // const q = query(collection(db, "memos"), orderBy("createdAt", "desc"));
-        // Since we don't have composite indexes created yet, simple query is safer or client-side sort.
-        // Let's try simple query first.
         if (!user) return;
+
+        // 1. Load from LocalStorage first for instant offline view
+        const cached = localStorage.getItem("memo_cache");
+        if (cached) {
+            setMemos(JSON.parse(cached));
+        }
 
         const q = query(
             collection(db, "memos"),
-            // orderBy("createdAt", "desc") // requires index if mixed with where(), let's simpler first
+            // orderBy("createdAt", "desc") 
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -55,9 +54,13 @@ export default function MemoPad() {
                 id: doc.id,
                 ...doc.data()
             })) as MemoItem[];
+
+            // 2. Update state and cache to LocalStorage
             setMemos(ms);
+            localStorage.setItem("memo_cache", JSON.stringify(ms));
         }, (error) => {
             console.error("Firestore Listen Error:", error);
+            // If offline, we stay with cached data
         });
 
         return () => unsubscribe();
@@ -188,7 +191,7 @@ export default function MemoPad() {
                             </div>
                             <button
                                 onClick={(e) => { e.stopPropagation(); deleteMemo(memo.id); }}
-                                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all px-2"
+                                className="opacity-40 hover:opacity-100 text-gray-400 hover:text-red-500 transition-all p-3 -mr-2"
                             >
                                 ✕
                             </button>
