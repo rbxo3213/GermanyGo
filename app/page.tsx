@@ -18,11 +18,12 @@ const LBSDiscovery = dynamic(() => import("../components/LBSDiscovery"), { loadi
 const AIOptimizer = dynamic(() => import("../components/AIOptimizer"), { ssr: false });
 const GroupChat = dynamic(() => import("../components/GroupChat"), { ssr: false });
 const MemberInfo = dynamic(() => import("../components/MemberInfo"), { ssr: false });
+const NicknameSetup = dynamic(() => import("../components/NicknameSetup"), { ssr: false }); // New
 
 type Tab = "guide" | "memo" | "itinerary" | "transport" | "map";
 
 export default function Home() {
-    const { user, loading } = useAuth();
+    const { user, userProfile, loading } = useAuth();
     const [activeTab, setActiveTab] = useState<Tab>("guide");
     const [activeLeg, setActiveLeg] = useState("leg1");
 
@@ -55,22 +56,62 @@ export default function Home() {
         );
     }
 
-    // 3. Logged In BUT Email Not Verified
-    if (user && !user.emailVerified) {
+    // 3. Logged In BUT No Profile (Kakao New User) -> Show Nickname Setup
+    // Use userProfile check. If user is logged in but userProfile is null, it means doc doesn't exist.
+    // 3. Logged In BUT Email Not Verified (Only for Email/Password users)
+    const isEmailProvider = user.providerData.some(p => p.providerId === 'password');
+    if (isEmailProvider && !user.emailVerified) {
         return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-                <div className="max-w-md w-full bg-white rounded-[2rem] shadow-2xl p-8 text-center relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-2 bg-yellow-400"></div>
-                    <h2 className="text-2xl font-bold mb-2">이메일 인증이 필요합니다</h2>
-                    <p className="text-gray-500 mb-6 word-keep-all">
-                        <span className="font-bold text-slate-800">{user.email}</span>로 인증 메일을 발송했습니다.
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white p-6">
+                <div className="w-full max-w-sm text-center">
+                    {/* Minimalist Icon */}
+                    <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl">
+                        <span className="text-4xl">✉️</span>
+                    </div>
+
+                    <h2 className="text-3xl font-extrabold mb-4 text-slate-900 tracking-tight">
+                        메일함을 확인해주세요
+                    </h2>
+
+                    <p className="text-gray-500 mb-10 text-lg break-keep leading-relaxed">
+                        <span className="font-bold text-slate-900 underline decoration-yellow-400 decoration-4 underline-offset-4">{user.email}</span><br />
+                        인증 메일이 발송되었습니다.
                     </p>
-                    <button onClick={() => window.location.reload()} className="w-full bg-black text-white font-bold py-4 rounded-2xl">
-                        인증 완료 (새로고침)
-                    </button>
+
+                    <div className="space-y-3">
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl text-lg hover:bg-black transition-all shadow-lg shadow-gray-200"
+                        >
+                            인증 완료 (새로고침)
+                        </button>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                if (!confirm("정말 가입을 취소하시겠습니까?")) return;
+                                try {
+                                    const { doc, deleteDoc, getFirestore } = await import("firebase/firestore");
+                                    const db = getFirestore();
+                                    await deleteDoc(doc(db, "users", user.uid));
+                                    await user.delete();
+                                } catch (e) {
+                                    console.error("Cleanup failed", e);
+                                    import("../firebase").then(m => m.auth.signOut());
+                                }
+                            }}
+                            className="w-full bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl text-lg hover:bg-gray-200 hover:text-gray-700 transition-all"
+                        >
+                            가입 취소
+                        </button>
+                    </div>
                 </div>
             </div>
         );
+    }
+
+    // 4. Logged In BUT No Profile (Kakao New User) -> Show Nickname Setup
+    if (user && !userProfile) {
+        return <NicknameSetup />;
     }
 
     // 4. Authenticated & Verified Dashboard (Tabbed)

@@ -12,12 +12,34 @@ import { doc, runTransaction } from "firebase/firestore";
 
 export function useAuth() {
     const [user, setUser] = useState<User | null>(null);
+    const [userProfile, setUserProfile] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             setUser(currentUser);
+
+            if (currentUser) {
+                // Fetch Profile from Firestore
+                try {
+                    const userRef = doc(db, "users", currentUser.uid);
+                    // Dynamically import getDoc to avoid circular dependencies if any, or just use imported doc
+                    const { getDoc } = await import("firebase/firestore"); // lazy load to be safe or use top level if standard
+                    const snap = await getDoc(userRef);
+                    if (snap.exists()) {
+                        setUserProfile(snap.data());
+                    } else {
+                        setUserProfile(null); // No profil found (New Kakao User)
+                    }
+                } catch (e) {
+                    console.error("Profile fetch error", e);
+                    setUserProfile(null);
+                }
+            } else {
+                setUserProfile(null);
+            }
+
             setLoading(false);
         });
         return () => unsubscribe();
@@ -98,5 +120,5 @@ export function useAuth() {
         return signOut(auth);
     };
 
-    return { user, loading, error, signup, login, logout };
+    return { user, userProfile, loading, error, signup, login, logout };
 }
