@@ -62,8 +62,12 @@ const itinerarySegments = [
     },
 ];
 
-export default function ItineraryTabs() {
-    const [activeTab, setActiveTab] = useState(itinerarySegments[0].id);
+interface Props {
+    activeTab: string;
+    onTabChange: (id: string) => void;
+}
+
+export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
     const activeSegment = itinerarySegments.find((seg) => seg.id === activeTab);
 
     return (
@@ -75,7 +79,7 @@ export default function ItineraryTabs() {
                     return (
                         <button
                             key={segment.id}
-                            onClick={() => setActiveTab(segment.id)}
+                            onClick={() => onTabChange(segment.id)}
                             className={`
                 relative px-5 py-3 text-sm font-bold transition-all duration-200 whitespace-nowrap min-w-[140px]
                 border-t border-l border-r rounded-t-xl -mb-[1px]

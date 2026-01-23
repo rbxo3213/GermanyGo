@@ -8,7 +8,7 @@ import {
     signOut,
     sendEmailVerification
 } from "firebase/auth";
-import { doc, getDoc, runTransaction } from "firebase/firestore";
+import { doc, runTransaction } from "firebase/firestore";
 
 export function useAuth() {
     const [user, setUser] = useState<User | null>(null);
@@ -25,38 +25,57 @@ export function useAuth() {
 
     const signup = async (email, password) => {
         setError(null);
+        let createdUser: User | null = null;
+
         try {
+            // 1. Create User First (Get Auth Token)
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            createdUser = userCredential.user;
+
+            // 2. Check Limit & Increment Count in Firestore
             await runTransaction(db, async (transaction) => {
                 const statsRef = doc(db, "meta", "stats");
                 const statsDoc = await transaction.get(statsRef);
 
                 if (!statsDoc.exists()) {
-                    throw "System Error: Stats document missing.";
+                    // Create stats doc if missing (1st user)
+                    transaction.set(statsRef, { user_count: 1 });
+                } else {
+                    const currentCount = statsDoc.data().user_count || 0;
+                    if (currentCount >= 3) {
+                        throw new Error("Group Full: Registration is limited to 3 members only.");
+                    }
+                    transaction.update(statsRef, { user_count: currentCount + 1 });
                 }
-
-                const currentCount = statsDoc.data().user_count || 0;
-
-                if (currentCount >= 3) {
-                    throw "Group Full: Registration is limited to 3 members only.";
-                }
-
-                transaction.update(statsRef, { user_count: currentCount + 1 });
             });
 
-            // Proceed with Auth creation only if transaction succeeds (logic gap here, but simplified for MVP)
-            // Ideally, we'd reserve the spot first, or use a cloud function trigger to roll back.
-            // For this constraint, checking first is the requested "Strict Rule".
-
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            await sendEmailVerification(userCredential.user);
-            return userCredential.user;
+            // 3. Send Verification Email
+            await sendEmailVerification(createdUser);
+            return createdUser;
 
         } catch (err: any) {
+            console.error("Signup Failed:", err);
+
+            // ROLLBACK: Delete the user if Firestore check failed
+            if (createdUser) {
+                try {
+                    await createdUser.delete();
+                } catch (delErr) {
+                    console.error("Rollback failed:", delErr);
+                }
+            }
+
             if (typeof err === "string") {
                 setError(err);
                 throw new Error(err);
             }
-            setError(err.message);
+            // Permission Error Handling
+            if (err.code === "permission-denied" || (err.message && err.message.includes("permission"))) {
+                setError("데이터베이스 권한이 없습니다. Firebase Console > Firestore Database > Rules를 확인해주세요. (read, write: if true)");
+                throw new Error("Permission Denied");
+            }
+
+            setError(err.message || "Signup failed");
             throw err;
         }
     };
