@@ -1,177 +1,216 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { db } from "../firebase";
 import { doc, updateDoc, arrayUnion } from "firebase/firestore";
-import { Trophy, Users } from "lucide-react";
+import { db } from "../firebase";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Play, RotateCw, Trophy, Sparkles, RefreshCcw } from "lucide-react";
 
-interface GameProps {
+interface RouletteProps {
     messageId: string;
-    participants: string[]; // List of Nicknames
+    participants: string[];
+    candidates?: string[];
     result: string | null;
     status: 'waiting' | 'spinning' | 'finished';
     currentUserNickname: string;
     isSender: boolean;
 }
 
-export default function GameRoulette({ messageId, participants = [], result, status, currentUserNickname, isSender }: GameProps) {
-    const [isSpinning, setIsSpinning] = useState(false);
-    const [displayResult, setDisplayResult] = useState(result || "?");
+export default function GameRoulette({ messageId, candidates = [], result, status, currentUserNickname, isSender }: RouletteProps) {
+    const [input, setInput] = useState("");
+    const [displayCandidate, setDisplayCandidate] = useState(candidates[0] || "?"); // For spinning effect
 
-    // Sync local spinning state with prop status
+    // Spinning Effect
     useEffect(() => {
-        if (status === 'spinning') {
-            setIsSpinning(true);
-            // Simulate spin visual
-            const interval = setInterval(() => {
-                const randomName = participants[Math.floor(Math.random() * participants.length)];
-                setDisplayResult(randomName || "...");
-            }, 100);
-
-            // Stop visual spin when result arrives (or timeout)
-            if (result) {
-                clearInterval(interval);
-                setIsSpinning(false);
-                setDisplayResult(result);
-            }
-
-            return () => clearInterval(interval);
-        } else if (status === 'finished' && result) {
-            setIsSpinning(false);
-            setDisplayResult(result);
+        let interval: NodeJS.Timeout;
+        if (status === 'spinning' && candidates.length > 0) {
+            interval = setInterval(() => {
+                const random = candidates[Math.floor(Math.random() * candidates.length)];
+                setDisplayCandidate(random);
+            }, 80); // Fast change (Slot machine effect)
         }
-    }, [status, result, participants]);
+        return () => clearInterval(interval);
+    }, [status, candidates]);
 
-    const handleJoin = async () => {
-        if (participants.includes(currentUserNickname)) return;
-        try {
-            const msgRef = doc(db, "messages", messageId);
-            await updateDoc(msgRef, {
-                participants: arrayUnion(currentUserNickname)
-            });
-        } catch (e) {
-            console.error("Join failed", e);
-        }
+    const addCandidate = async () => {
+        if (!input.trim()) return;
+        const option = input.trim();
+        await updateDoc(doc(db, "messages", messageId), {
+            candidates: arrayUnion(option)
+        });
+        setInput("");
     };
 
-    const handleStart = async () => {
-        if (participants.length < 2) {
-            alert("최소 2명이 필요합니다!");
+    const handleSpin = async () => {
+        if (candidates.length < 2) {
+            alert("최소 2개의 선택지가 필요합니다.");
             return;
         }
-        try {
-            const msgRef = doc(db, "messages", messageId);
-            // Set status to spinning first
-            await updateDoc(msgRef, { status: 'spinning' });
+        await updateDoc(doc(db, "messages", messageId), { status: 'spinning' });
 
-            // Wait a bit then pick winner
-            setTimeout(async () => {
-                const winner = participants[Math.floor(Math.random() * participants.length)];
-                await updateDoc(msgRef, {
-                    status: 'finished',
-                    result: winner
-                });
-            }, 3000);
-        } catch (e) {
-            console.error("Start failed", e);
-        }
+        const randomIndex = Math.floor(Math.random() * candidates.length);
+        const selected = candidates[randomIndex];
+
+        // 3초 후 결과 저장 (스피닝 효과 보여줌)
+        setTimeout(async () => {
+            await updateDoc(doc(db, "messages", messageId), {
+                status: 'finished',
+                result: selected
+            });
+        }, 3000);
+    };
+
+    const handleReset = async () => {
+        await updateDoc(doc(db, "messages", messageId), {
+            status: 'waiting',
+            result: null,
+            candidates: []
+        });
     };
 
     return (
-        <div className="w-64 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-[24px] p-5 shadow-[0_8px_30px_rgb(0,0,0,0.08)] border border-gray-100 w-72 overflow-hidden relative">
+
             {/* Header */}
-            <div className="bg-slate-900 px-4 py-3 flex justify-between items-center">
-                <div className="flex items-center gap-2 text-white">
-                    <Trophy size={16} className="text-[#FFCE00]" />
-                    <span className="font-bold text-sm">운명의 돌림판</span>
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center shadow-sm">
+                        <RotateCw size={16} />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-slate-900 leading-none">Decision Maker</h3>
+                        <p className="text-[10px] text-gray-400 mt-0.5 font-medium">운명에 맡겨보세요</p>
+                    </div>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-gray-400">
-                    <Users size={12} />
-                    <span>{participants.length}명 참여</span>
-                </div>
+                {status === 'waiting' && (
+                    <span className="text-[10px] font-bold bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full">
+                        {candidates.length} options
+                    </span>
+                )}
             </div>
 
-            {/* Game Content */}
-            <div className="p-6 flex flex-col items-center justify-center min-h-[160px] relative">
+            {/* Content Area */}
+            <div className="relative min-h-[140px] bg-slate-50 rounded-2xl mb-4 flex flex-col items-center justify-center overflow-hidden p-4 border border-slate-100 shadow-inner">
 
+                {/* Waiting State */}
                 {status === 'waiting' && (
-                    <motion.div
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="text-center"
-                    >
-                        <div className="text-4xl mb-2">🎲</div>
-                        <p className="text-sm text-gray-500 font-medium mb-4">
-                            누가 걸릴까요?
-                        </p>
-
-                        {!participants.includes(currentUserNickname) ? (
-                            <button
-                                onClick={handleJoin}
-                                className="bg-[#FFCE00] hover:bg-[#e6b800] text-black font-bold py-2 px-6 rounded-full text-sm shadow-md active:scale-95 transition-all"
-                            >
-                                참여하기
-                            </button>
+                    <div className="w-full h-full flex flex-col justify-center">
+                        {candidates.length === 0 ? (
+                            <div className="flex flex-col items-center text-gray-400 gap-2">
+                                <Sparkles size={24} className="opacity-40" />
+                                <span className="text-xs font-bold opacity-60">선택지를 추가해주세요</span>
+                            </div>
                         ) : (
-                            <span className="text-xs font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full">
-                                참여 완료
-                            </span>
+                            <div className="flex flex-wrap gap-2 justify-center content-center max-h-[120px] overflow-y-auto scrollbar-hide">
+                                {candidates.map((c, i) => (
+                                    <motion.span
+                                        initial={{ scale: 0 }} animate={{ scale: 1 }}
+                                        key={i}
+                                        className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-xl shadow-sm"
+                                    >
+                                        {c}
+                                    </motion.span>
+                                ))}
+                            </div>
                         )}
-
-                        <div className="flex flex-wrap justify-center gap-1 mt-4">
-                            {participants.map(p => (
-                                <span key={p} className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                                    {p}
-                                </span>
-                            ))}
-                        </div>
-                    </motion.div>
-                )}
-
-                {(status === 'spinning' || status === 'finished') && (
-                    <div className="flex flex-col items-center">
-                        <motion.div
-                            animate={isSpinning ? { rotate: 360 } : { rotate: 0 }}
-                            transition={isSpinning ? { repeat: Infinity, duration: 0.5, ease: "linear" } : {}}
-                            className={`w-20 h-20 rounded-full border-4 flex items-center justify-center mb-4 shadow-inner
-                                ${status === 'finished' ? 'border-[#FFCE00] bg-yellow-50' : 'border-slate-200 bg-white'}
-                            `}
-                        >
-                            <span className={`text-2xl font-black ${status === 'finished' ? 'text-slate-900' : 'text-gray-300'}`}>
-                                {status === 'finished' ? '👑' : '?'}
-                            </span>
-                        </motion.div>
-
-                        <div className="text-center">
-                            <p className="text-xs text-gray-400 font-bold tracking-widest uppercase mb-1">WINNER</p>
-                            <motion.p
-                                key={displayResult}
-                                initial={{ opacity: 0, y: 5 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="text-2xl font-black text-slate-900"
-                            >
-                                {displayResult}
-                            </motion.p>
-                        </div>
                     </div>
                 )}
+
+                {/* Spinning State (Slot Machine Effect) */}
+                {status === 'spinning' && (
+                    <div className="flex flex-col items-center justify-center gap-3">
+                        <motion.div
+                            key={displayCandidate} // Key change triggers animation
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: -20, opacity: 0 }}
+                            className="text-3xl font-black text-indigo-600 tracking-tight"
+                        >
+                            {displayCandidate}
+                        </motion.div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest animate-pulse">Picking...</p>
+
+                        {/* Visual Blur Lines */}
+                        <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-slate-50 via-transparent to-slate-50" />
+                    </div>
+                )}
+
+                {/* Finished State (Result) */}
+                <AnimatePresence>
+                    {status === 'finished' && (
+                        <motion.div
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ type: "spring", bounce: 0.5 }}
+                            className="text-center w-full relative z-10"
+                        >
+                            {/* Confetti Background (CSS) */}
+                            <div className="absolute inset-0 flex justify-center items-center pointer-events-none">
+                                <div className="w-full h-full bg-[radial-gradient(circle,#FFD700_2px,transparent_2px)] bg-[length:20px_20px] opacity-20 animate-pulse" />
+                            </div>
+
+                            <div className="w-16 h-16 bg-gradient-to-br from-yellow-100 to-amber-200 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg border-2 border-white ring-4 ring-yellow-50 relative">
+                                <Trophy size={32} className="text-yellow-600 drop-shadow-sm" fill="currentColor" />
+                                <motion.div
+                                    animate={{ rotate: 360, scale: [1, 1.2, 1] }}
+                                    transition={{ duration: 2, repeat: Infinity }}
+                                    className="absolute -top-1 -right-1"
+                                >
+                                    <Sparkles size={16} className="text-yellow-400 fill-current" />
+                                </motion.div>
+                            </div>
+
+                            <p className="text-[10px] text-gray-400 font-extrabold uppercase tracking-widest mb-1">Winner</p>
+                            <p className="text-2xl font-black text-slate-800 leading-tight break-keep px-2 drop-shadow-sm">
+                                {result}
+                            </p>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
-            {/* Footer Control */}
-            {status === 'waiting' && isSender && (
-                <button
-                    onClick={handleStart}
-                    className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-slate-900 text-sm font-bold border-t border-gray-100 transition-colors"
-                >
-                    돌려돌려 돌림판 시작!
-                </button>
+            {/* Input & Action Area */}
+            {status === 'waiting' && (
+                <div className="space-y-3">
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && addCandidate()}
+                            placeholder="선택지 입력..."
+                            className="flex-1 text-sm bg-gray-50 border border-gray-200 px-4 py-2.5 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-200 transition-all placeholder:text-gray-400 font-medium"
+                        />
+                        <button
+                            onClick={addCandidate}
+                            disabled={!input.trim()}
+                            className="bg-slate-900 hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed text-white w-11 h-11 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95"
+                        >
+                            <Plus size={20} strokeWidth={2.5} />
+                        </button>
+                    </div>
+
+                    {isSender && (
+                        <button
+                            onClick={handleSpin}
+                            disabled={candidates.length < 2}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.98]"
+                        >
+                            <Play size={14} fill="currentColor" />
+                            결정하기
+                        </button>
+                    )}
+                </div>
             )}
 
-            {status === 'finished' && (
-                <div className="w-full py-2 bg-gray-50 text-center text-xs text-gray-400 font-medium border-t border-gray-100">
-                    게임 종료
+            {status === 'finished' && isSender && (
+                <div className="text-center mt-2">
+                    <button
+                        onClick={handleReset}
+                        className="text-xs font-bold text-gray-400 hover:text-slate-900 transition-colors flex items-center justify-center gap-1 mx-auto py-2 px-4 rounded-lg hover:bg-gray-50"
+                    >
+                        <RefreshCcw size={12} /> 다시 하기
+                    </button>
                 </div>
             )}
         </div>

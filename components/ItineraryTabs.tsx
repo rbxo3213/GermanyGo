@@ -73,7 +73,7 @@ export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
     return (
         <div className="w-full max-w-4xl mx-auto py-8">
             {/* 2. Navigation Tabs */}
-            <div className="flex overflow-x-auto no-scrollbar scroll-smooth border-b border-gray-200">
+            <div className="flex overflow-x-auto no-scrollbar scroll-smooth border-b border-gray-200 touch-pan-x">
                 {itinerarySegments.map((segment) => {
                     const isActive = activeTab === segment.id;
                     return (

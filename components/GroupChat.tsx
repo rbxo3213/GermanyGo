@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { db, storage } from "../firebase";
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp, updateDoc, doc, getDocs, where, getDoc, deleteDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db } from "../firebase";
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp, updateDoc, doc, getDocs, getDoc, deleteDoc } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
-import { Image as ImageIcon, Smile, Plus, X, Send, Loader2, Gamepad2, Trash2, Trophy } from "lucide-react";
+import { X, ArrowRight, Plus, Trophy, Trash2, Image as ImageIcon } from "lucide-react";
 import GameRoulette from "./GameRoulette";
+import ImageCropModal from "./ImageCropModal"; // New
 
 interface Message {
     id: string;
@@ -18,9 +18,9 @@ interface Message {
     nickname: string;
     readBy: string[];
     createdAt: Timestamp | null;
-    // Game Specific Fields
     status?: 'waiting' | 'spinning' | 'finished';
     participants?: string[];
+    candidates?: string[]; // New
     result?: string | null;
 }
 
@@ -34,12 +34,18 @@ export default function GroupChat({ onClose }: GroupChatProps) {
     const [inputText, setInputText] = useState("");
     const [totalMembers, setTotalMembers] = useState(0);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    // Image Upload State
+    const [selectedImg, setSelectedImg] = useState<string | null>(null); // To show in crop modal
     const [isUploading, setIsUploading] = useState(false);
 
-    const [userNickname, setUserNickname] = useState<string>("");
+    // For Composition (IME) handling
+    const [isComposing, setIsComposing] = useState(false);
 
+    const [userNickname, setUserNickname] = useState<string>("");
     const scrollRef = useRef<HTMLDivElement>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const listRef = useRef<HTMLDivElement>(null); // For raw scroll manipulation
+    const [isInitialLoad, setIsInitialLoad] = useState(true);
 
     // 0. Fetch Current User's Nickname
     useEffect(() => {
@@ -54,7 +60,7 @@ export default function GroupChat({ onClose }: GroupChatProps) {
         fetchMyProfile();
     }, [user]);
 
-    // 0. Fetch Total Members Count (for Unread Calc)
+    // 0. Fetch Total Members Count
     useEffect(() => {
         const fetchMemberCount = async () => {
             const q = query(collection(db, "users"));
@@ -64,62 +70,74 @@ export default function GroupChat({ onClose }: GroupChatProps) {
         fetchMemberCount();
     }, []);
 
-    // 1. Subscribe to Messages & Update Read Status
+    // 1. Subscribe to Messages
     useEffect(() => {
         const q = query(collection(db, "messages"), orderBy("createdAt", "asc"));
-
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const msgs: Message[] = [];
-
             snapshot.docs.forEach(d => {
                 const data = d.data();
                 const m = { id: d.id, ...data } as Message;
                 msgs.push(m);
-
-                // Mark as read if I haven't read it yet
+                // Mark as read
                 if (user && user.uid && (!m.readBy || !m.readBy.includes(user.uid))) {
                     updateDoc(doc(db, "messages", d.id), {
                         readBy: [...(m.readBy || []), user.uid]
-                    }).catch(e => console.error("Read status update error", e));
+                    }).catch(e => console.error("Read update error", e));
                 }
             });
-
             setMessages(msgs);
-            setTimeout(() => {
-                scrollRef.current?.scrollIntoView({ behavior: "auto" });
-            }, 100);
         });
-
         return () => unsubscribe();
     }, [user]);
 
-    // 2. Send Text
+    // 2. Scroll Logic (Instant Bottom)
+    useLayoutEffect(() => {
+        if (messages.length > 0) {
+            if (isInitialLoad) {
+                // First load: Instant jump
+                scrollRef.current?.scrollIntoView({ behavior: "auto" });
+                setIsInitialLoad(false);
+            } else {
+                // Subsequent: Smooth scroll
+                setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+            }
+        }
+    }, [messages, isInitialLoad]);
+
+    // 3. Send Text
     const handleSend = async (e?: React.FormEvent) => {
         e?.preventDefault();
-        if (!inputText.trim() || !user) return;
+        if (!inputText.trim() || !user || isComposing) return;
+
+        const textToSend = inputText;
+        setInputText("");
 
         try {
             await addDoc(collection(db, "messages"), {
-                text: inputText,
+                text: textToSend,
                 type: 'text',
                 uid: user.uid,
                 nickname: userNickname || "멤버",
                 readBy: [user.uid],
                 createdAt: serverTimestamp()
             });
-            setInputText("");
             setIsMenuOpen(false);
-        } catch (err) { console.error(err); }
+        } catch (err) {
+            console.error(err);
+            setInputText(textToSend);
+        }
     };
 
-    // 3. Send Game (Roulette)
+    // 4. Send Game
     const handleStartGame = async () => {
         if (!user) return;
         try {
             await addDoc(collection(db, "messages"), {
                 type: 'game_roulette',
                 status: 'waiting',
-                participants: [userNickname], // Host auto-joined
+                participants: [userNickname],
+                candidates: [], // New Field
                 result: null,
                 uid: user.uid,
                 nickname: userNickname || "멤버",
@@ -130,18 +148,50 @@ export default function GroupChat({ onClose }: GroupChatProps) {
         } catch (err) { console.error(err); }
     };
 
-    // 4. Delete Message
-    const handleDelete = async (msgId: string) => {
-        if (!confirm("메시지를 삭제하시겠습니까? (나에게만 삭제되는 것이 아니라 모두에게 삭제됩니다)")) return;
-        try {
-            await deleteDoc(doc(db, "messages", msgId));
-        } catch (e) {
-            console.error(e);
-            alert("삭제 실패");
+    // 5. Image Select & Upload
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+                setSelectedImg(reader.result as string);
+                // Don't close menu yet, wait for crop
+            };
         }
     };
 
-    // Helper: Date Logic
+    const handleImageUpload = async (croppedBase64: string) => {
+        if (!user) return;
+        setIsUploading(true);
+        try {
+            await addDoc(collection(db, "messages"), {
+                imageUrl: croppedBase64,
+                type: 'image',
+                uid: user.uid,
+                nickname: userNickname || "멤버",
+                readBy: [user.uid],
+                createdAt: serverTimestamp()
+            });
+            setSelectedImg(null); // Close modal
+            setIsMenuOpen(false);
+        } catch (e) {
+            console.error(e);
+            alert("사진 전송 실패");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    // 6. Delete Message
+    const handleDelete = async (msgId: string) => {
+        if (!confirm("메시지를 삭제하시겠습니까?")) return;
+        try {
+            await deleteDoc(doc(db, "messages", msgId));
+        } catch (e) { console.error(e); }
+    };
+
+    // Helpers
     const isNewDay = (current: Message, prev?: Message) => {
         const curDate = current.createdAt ? current.createdAt.toDate().toDateString() : new Date().toDateString();
         if (!prev) return true;
@@ -159,184 +209,200 @@ export default function GroupChat({ onClose }: GroupChatProps) {
         let h = d.getHours();
         let m = d.getMinutes();
         const ampm = h >= 12 ? '오후' : '오전';
-        h = h % 12;
-        h = h ? h : 12;
+        h = h % 12; h = h ? h : 12;
         const mm = m < 10 ? '0' + m : m;
         return `${ampm} ${h}:${mm}`;
     };
 
     return (
         <motion.div
-            initial={{ opacity: 0, y: "100%" }}
+            initial={{ opacity: 1, y: 0 }} // Changed to no slide-in for instant feel, or simple fade
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: "100%" }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed inset-0 z-[5000] bg-white flex flex-col pt-safe-top"
+            className="fixed inset-0 z-[5000] bg-[#F2F4F6] flex flex-col pt-safe-top"
         >
             {/* Header */}
-            <div className="bg-white px-4 py-4 flex justify-between items-center z-10 border-b border-gray-100 sticky top-0">
-                <h2 className="text-xl font-extrabold tracking-tight flex items-center gap-1 text-slate-900">
-                    <span>여행 수다방</span>
-                    <span className="text-sm font-bold text-gray-400 align-top">({totalMembers})</span>
-                </h2>
-                <button onClick={onClose} className="p-2 text-slate-900 hover:bg-gray-50 rounded-full transition-colors">
+            <div className="bg-white/80 backdrop-blur-md px-5 py-4 flex justify-between items-center z-20 border-b border-gray-200/50 sticky top-0 shadow-sm">
+                <div>
+                    <h2 className="text-lg font-black tracking-tight text-slate-900 flex items-center gap-1.5">
+                        Chat Room
+                        <span className="bg-slate-100 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-md font-bold">{totalMembers}</span>
+                    </h2>
+                </div>
+                <button onClick={onClose} className="p-2 -mr-2 text-slate-400 hover:text-slate-900 hover:bg-gray-100/50 rounded-full transition-all">
                     <X size={24} />
                 </button>
             </div>
 
             {/* Message List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-white">
+            <div ref={listRef} className={`flex-1 overflow-y-auto p-4 space-y-2 bg-[#F2F4F6] ${isInitialLoad ? "opacity-0" : "opacity-100 transition-opacity duration-300"}`}>
                 {messages.map((msg, idx) => {
                     const isMe = msg.uid === user?.uid;
                     const prevMsg = messages[idx - 1];
+                    const nextMsg = messages[idx + 1];
                     const showDate = isNewDay(msg, prevMsg);
+
+                    // Grouping logic
+                    const isSequence = prevMsg && prevMsg.uid === msg.uid && !showDate;
+                    const isLastInSequence = !nextMsg || nextMsg.uid !== msg.uid || isNewDay(nextMsg, msg);
                     const unreadCount = totalMembers - (msg.readBy?.length || 0);
 
                     return (
                         <div key={msg.id} className="flex flex-col">
                             {showDate && (
-                                <div className="flex items-center gap-4 my-8 opacity-50">
-                                    <div className="h-px bg-gray-200 flex-1"></div>
-                                    <span className="text-xs font-bold text-gray-400 tracking-widest uppercase">
+                                <div className="flex justify-center my-6">
+                                    <span className="bg-gray-200/60 text-gray-500 text-[10px] font-bold px-3 py-1 rounded-full shadow-sm">
                                         {formatDate(msg.createdAt)}
                                     </span>
-                                    <div className="h-px bg-gray-200 flex-1"></div>
                                 </div>
                             )}
 
-                            <div className={`flex gap-3 ${isMe ? "flex-row-reverse" : "flex-row"} items-end group`}>
+                            <div className={`flex gap-2 ${isMe ? "flex-row-reverse" : "flex-row"} ${isSequence ? "mt-1" : "mt-3"} group`}>
                                 {!isMe && (
-                                    <div className="flex-shrink-0 flex flex-col items-center pb-1">
-                                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center border border-gray-100 text-xs text-gray-600 font-extrabold shadow-sm">
-                                            {msg.nickname?.[0] || "?"}
-                                        </div>
+                                    <div className="flex-shrink-0 w-8 flex flex-col items-center">
+                                        {!isSequence ? (
+                                            <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center border border-gray-100 text-xs font-black text-slate-700 shadow-sm">
+                                                {msg.nickname?.[0] || "?"}
+                                            </div>
+                                        ) : <div className="w-8" />}
                                     </div>
                                 )}
 
-                                <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[85%]`}>
-                                    {!isMe && <span className="text-[11px] font-bold text-gray-400 ml-1 mb-1">{msg.nickname || "멤버"}</span>}
+                                <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[75%]`}>
+                                    {!isMe && !isSequence && (
+                                        <span className="text-[11px] text-gray-500 ml-1 mb-1 font-medium">{msg.nickname}</span>
+                                    )}
 
-                                    <div className="flex items-end gap-1.5">
-                                        {isMe && (
-                                            <div className="flex flex-col items-end text-[10px] text-gray-300 font-medium leading-none mb-1 gap-1">
-                                                {/* Delete Button (Only visible on hover/active or simple tap logic) */}
-                                                <button
-                                                    onClick={() => handleDelete(msg.id)}
-                                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded-full text-gray-300 hover:text-red-500"
-                                                    title="삭제"
-                                                >
-                                                    <Trash2 size={10} />
-                                                </button>
-                                                {unreadCount > 0 && <span className="text-[#DD0000] font-bold">{unreadCount}</span>}
-                                                <span>{formatTime(msg.createdAt)}</span>
-                                            </div>
-                                        )}
-
-                                        {/* Message Content */}
+                                    <div className={`flex items-end gap-1.5 ${isMe ? "flex-row-reverse" : "flex-row"}`}>
+                                        {/* Message Bubble */}
                                         {msg.type === 'text' && (
-                                            <div className={`px-4 py-3 rounded-2xl text-[15px] font-medium shadow-sm relative break-all whitespace-pre-wrap leading-relaxed
+                                            <div className={`px-3.5 py-2.5 text-[15px] shadow-sm leading-relaxed break-all whitespace-pre-wrap relative
                                                 ${isMe
-                                                    ? "bg-slate-900 text-white rounded-br-none"
-                                                    : "bg-gray-100 text-slate-800 rounded-bl-none border border-gray-100"
-                                                }`}>
+                                                    ? "bg-slate-900 text-white rounded-2xl rounded-tr-sm"
+                                                    : "bg-white text-slate-800 rounded-2xl rounded-tl-sm border border-gray-100"
+                                                }
+                                            `}>
                                                 {msg.text}
                                             </div>
                                         )}
+
                                         {msg.type === 'game_roulette' && (
                                             <GameRoulette
                                                 messageId={msg.id}
                                                 participants={msg.participants || []}
+                                                candidates={msg.candidates || []}
                                                 result={msg.result || null}
                                                 status={msg.status || 'waiting'}
                                                 currentUserNickname={userNickname}
                                                 isSender={isMe}
                                             />
                                         )}
-                                        {msg.type === 'image' && (
-                                            <div className="rounded-2xl overflow-hidden shadow-md border border-gray-100 max-w-[200px]">
+
+                                        {msg.type === 'image' && msg.imageUrl && (
+                                            <div className="rounded-2xl overflow-hidden border border-gray-200 bg-white max-w-[200px]">
                                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img src={msg.imageUrl} alt="전송된 이미지" className="w-full h-auto bg-gray-50" />
+                                                <img src={msg.imageUrl} alt="img" className="w-full h-auto object-cover" />
                                             </div>
                                         )}
 
-                                        {!isMe && (
-                                            <div className="flex flex-col items-start text-[10px] text-gray-300 font-medium leading-none mb-1 gap-0.5">
-                                                {unreadCount > 0 && <span className="text-[#DD0000] font-bold">{unreadCount}</span>}
-                                                <span>{formatTime(msg.createdAt)}</span>
-                                            </div>
-                                        )}
+                                        {/* Meta */}
+                                        <div className={`flex flex-col text-[10px] text-gray-400 font-medium leading-none mb-0.5 gap-0.5 ${isMe ? "items-end" : "items-start"}`}>
+                                            {isMe && (
+                                                <button onClick={() => handleDelete(msg.id)} className="opacity-0 group-hover:opacity-100 p-1 -mr-1 hover:text-red-500 transition-opacity">
+                                                    <Trash2 size={10} />
+                                                </button>
+                                            )}
+                                            {unreadCount > 0 && <span className="text-[#DD0000] font-bold">{unreadCount}</span>}
+                                            {isLastInSequence && <span>{formatTime(msg.createdAt)}</span>}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     );
                 })}
-                <div ref={scrollRef} />
+                <div ref={scrollRef} className="h-4" />
             </div>
 
-            {/* Menu (Game) */}
+            {/* Menu (Game + Image) */}
             <AnimatePresence>
                 {isMenuOpen && (
                     <motion.div
-                        initial={{ height: 0 }}
-                        animate={{ height: "auto" }}
-                        exit={{ height: 0 }}
-                        className="bg-gray-50 border-t border-gray-100 overflow-hidden"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="bg-white border-t border-gray-100 overflow-hidden shadow-[0_-4px_20px_rgba(0,0,0,0.05)] relative z-20"
                     >
                         <div className="p-4 flex gap-4 overflow-x-auto">
+                            {/* Game Button */}
                             <button
                                 onClick={handleStartGame}
-                                className="flex flex-col items-center gap-2 p-4 bg-white rounded-2xl shadow-sm hover:bg-yellow-50 active:scale-95 transition-all min-w-[100px]"
+                                className="flex flex-col items-center gap-2 p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-[#FFF9C4] hover:border-[#FFCE00] active:scale-95 transition-all min-w-[90px]"
                             >
-                                <div className="w-12 h-12 bg-[#FFCE00] rounded-full flex items-center justify-center text-slate-900">
-                                    <Trophy size={24} />
+                                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-900 shadow-sm border border-gray-100">
+                                    <Trophy size={20} className="text-[#FFCE00]" fill="currentColor" />
                                 </div>
-                                <span className="text-xs font-bold text-slate-900">돌림판 게임</span>
+                                <span className="text-xs font-bold text-slate-700">돌림판</span>
                             </button>
 
-                            {/* Placeholder for future games */}
-                            <button
-                                disabled
-                                className="flex flex-col items-center gap-2 p-4 bg-white rounded-2xl shadow-sm opacity-50 min-w-[100px]"
-                            >
-                                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center text-gray-400">
-                                    <Gamepad2 size={24} />
+                            {/* Image Button (New) */}
+                            <label className="flex flex-col items-center gap-2 p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-blue-50 hover:border-blue-200 active:scale-95 transition-all min-w-[90px] cursor-pointer">
+                                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-900 shadow-sm border border-gray-100">
+                                    <ImageIcon size={20} className="text-blue-500" />
                                 </div>
-                                <span className="text-xs font-bold text-gray-400">준비중</span>
-                            </button>
+                                <span className="text-xs font-bold text-slate-700">사진</span>
+                                <input type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+                            </label>
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
 
             {/* Input Bar */}
-            <div className="bg-white px-4 py-3 flex items-center gap-3 pb-safe border-t border-gray-100">
+            <div className="bg-white px-3 py-3 pb-safe border-t border-gray-200 flex items-center gap-2 z-20">
                 <button
                     onClick={() => setIsMenuOpen(!isMenuOpen)}
-                    className={`p-2 rounded-full transition-all ${isMenuOpen ? "bg-slate-900 text-[#FFCE00]" : "text-gray-400 hover:text-slate-900"}`}
+                    className={`p-2.5 rounded-full transition-all ${isMenuOpen ? "bg-slate-100 text-slate-900 rotate-90" : "text-gray-400 hover:bg-gray-50 hover:text-slate-900"}`}
                 >
-                    <Gamepad2 size={24} className={`transition-transform duration-200 ${isMenuOpen ? "rotate-12" : ""}`} />
+                    <Plus size={24} />
                 </button>
 
-                <form onSubmit={handleSend} className="flex-1 flex gap-2">
+                <form onSubmit={handleSend} className="flex-1 flex gap-2 bg-gray-100 rounded-[24px] px-2 py-1.5 items-center focus-within:ring-2 focus-within:ring-slate-900/10 transition-all border border-transparent focus-within:bg-white focus-within:border-gray-200">
                     <input
                         type="text"
                         value={inputText}
                         onFocus={() => setIsMenuOpen(false)}
                         onChange={(e) => setInputText(e.target.value)}
-                        placeholder="메시지 보내기..."
-                        className="flex-1 bg-gray-50 border-none rounded-2xl px-5 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-slate-900/5 transition-all placeholder:text-gray-400"
+                        onCompositionStart={() => setIsComposing(true)}
+                        onCompositionEnd={() => setIsComposing(false)}
+                        placeholder="메시지 입력..."
+                        className="flex-1 bg-transparent border-none px-3 text-[15px] focus:outline-none placeholder:text-gray-400 text-slate-900 min-w-0"
                     />
                     <button
                         type="submit"
                         disabled={!inputText.trim()}
-                        className={`p-3 rounded-full transition-all flex items-center justify-center shadow-sm
-                            ${inputText.trim() ? "bg-slate-900 text-white hover:bg-black" : "bg-gray-100 text-gray-300"}`}
+                        className={`p-2 rounded-full transition-all flex-shrink-0
+                            ${inputText.trim()
+                                ? "bg-slate-900 text-white shadow-md transform active:scale-90 hover:bg-black"
+                                : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                            }`}
                     >
-                        <Send size={18} />
+                        <ArrowRight size={18} strokeWidth={3} />
                     </button>
                 </form>
             </div>
+
+            {/* Crop Modal */}
+            <AnimatePresence>
+                {selectedImg && (
+                    <ImageCropModal
+                        imageSrc={selectedImg}
+                        aspect={4 / 3} // Default photo aspect
+                        onCancel={() => setSelectedImg(null)}
+                        onCropComplete={handleImageUpload}
+                    />
+                )}
+            </AnimatePresence>
         </motion.div>
     );
 }

@@ -1,35 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
-import BottomNav from "../components/BottomNav";
-import TabSkeleton from "../components/TabSkeleton";
-import LoginModal from "../components/LoginModal";
-import { useAuth } from "../hooks/useAuth";
+import BottomNav from "@/components/BottomNav";
+import TabSkeleton from "@/components/TabSkeleton";
+import LoginModal from "@/components/LoginModal";
+import { useAuth } from "@/hooks/useAuth";
 import { AnimatePresence } from "framer-motion";
-import { MessageSquare, Users, LogOut } from "lucide-react";
+import { MessageSquare, Users, LogOut, Zap, Image as ImageIcon, Map as MapIcon, Languages, Calendar, Bus, Book } from "lucide-react";
 
 // Async Components (Lazy Load)
 const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
 const ItineraryTabs = dynamic(() => import("../components/ItineraryTabs"), { loading: () => <TabSkeleton /> });
 const TransportComparison = dynamic(() => import("../components/TransportComparison"), { loading: () => <TabSkeleton /> });
+const DailyLog = dynamic(() => import("../components/BeerPassport"), { loading: () => <TabSkeleton />, ssr: false }); // Renamed import for clarity
 const CityGuide = dynamic(() => import("../components/CityGuide"), { loading: () => <TabSkeleton /> });
+const GermanPhrasebook = dynamic(() => import("../components/GermanPhrasebook"), { loading: () => <TabSkeleton />, ssr: false });
+const TravelLog = dynamic(() => import("../components/TravelLog"), { loading: () => <TabSkeleton />, ssr: false });
+const PrivateDiary = dynamic(() => import("../components/PrivateDiary"), { loading: () => <TabSkeleton />, ssr: false });
 const LBSDiscovery = dynamic(() => import("../components/LBSDiscovery"), { loading: () => <TabSkeleton />, ssr: false });
 const AIOptimizer = dynamic(() => import("../components/AIOptimizer"), { ssr: false });
 const GroupChat = dynamic(() => import("../components/GroupChat"), { ssr: false });
 const MemberInfo = dynamic(() => import("../components/MemberInfo"), { ssr: false });
-const NicknameSetup = dynamic(() => import("../components/NicknameSetup"), { ssr: false }); // New
+const NicknameSetup = dynamic(() => import("../components/NicknameSetup"), { ssr: false });
 
-type Tab = "guide" | "memo" | "itinerary" | "transport" | "map";
+type Tab = "guide" | "memo" | "log" | "transport" | "map";
 
 export default function Home() {
     const { user, userProfile, loading } = useAuth();
     const [activeTab, setActiveTab] = useState<Tab>("guide");
     const [activeLeg, setActiveLeg] = useState("leg1");
 
+    // Sub-tabs
+    const [guideMode, setGuideMode] = useState<"city" | "phrase">("city");
+    const [transportMode, setTransportMode] = useState<"info" | "itinerary">("itinerary");
+    const [logMode, setLogMode] = useState<"beer" | "gallery" | "diary">("beer");
+
     // Modals
     const [showChat, setShowChat] = useState(false);
     const [showMembers, setShowMembers] = useState(false);
+
+    const [dDay, setDDay] = useState("D-DAY");
+
+    useEffect(() => {
+        const target = new Date("2026-02-06T00:00:00");
+        const today = new Date();
+        // Reset hours to compare dates only
+        today.setHours(0, 0, 0, 0);
+        target.setHours(0, 0, 0, 0);
+
+        const diffTime = target.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays > 0) setDDay(`D-${diffDays}`);
+        else if (diffDays === 0) setDDay("D-Day");
+        else setDDay(`D+${Math.abs(diffDays)}`);
+    }, []);
 
     // 1. Loading State
     if (loading) {
@@ -43,65 +69,49 @@ export default function Home() {
         );
     }
 
-    // 2. Not Logged In -> Show Login Modal
+    // 2. Not Logged In
     if (!user) {
         return (
             <div className="min-h-screen bg-slate-50 relative overflow-hidden">
                 <div className="absolute inset-0 z-0 opacity-10" style={{
-                    backgroundImage: "radial-gradient(#444 1px, transparent 1px)",
-                    backgroundSize: "20px 20px"
+                    backgroundImage: "radial-gradient(#444 1px, transparent 1px)", backgroundSize: "20px 20px"
                 }}></div>
                 <LoginModal />
             </div>
         );
     }
 
-    // 3. Logged In BUT No Profile (Kakao New User) -> Show Nickname Setup
-    // Use userProfile check. If user is logged in but userProfile is null, it means doc doesn't exist.
-    // 3. Logged In BUT Email Not Verified (Only for Email/Password users)
+    // 3. Email Verified Check
     const isEmailProvider = user.providerData.some(p => p.providerId === 'password');
     if (isEmailProvider && !user.emailVerified) {
         return (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white p-6">
                 <div className="w-full max-w-sm text-center">
-                    {/* Minimalist Icon */}
                     <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl">
                         <span className="text-4xl">✉️</span>
                     </div>
-
-                    <h2 className="text-3xl font-extrabold mb-4 text-slate-900 tracking-tight">
-                        메일함을 확인해주세요
-                    </h2>
-
+                    <h2 className="text-3xl font-extrabold mb-4 text-slate-900 tracking-tight">메일함을 확인해주세요</h2>
                     <p className="text-gray-500 mb-10 text-lg break-keep leading-relaxed">
                         <span className="font-bold text-slate-900 underline decoration-yellow-400 decoration-4 underline-offset-4">{user.email}</span><br />
                         인증 메일이 발송되었습니다.
                     </p>
-
                     <div className="space-y-3">
-                        <button
-                            onClick={() => window.location.reload()}
-                            className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl text-lg hover:bg-black transition-all shadow-lg shadow-gray-200"
-                        >
+                        <button onClick={() => window.location.reload()} className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl text-lg hover:bg-black transition-all shadow-lg shadow-gray-200">
                             인증 완료 (새로고침)
                         </button>
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                if (!confirm("정말 가입을 취소하시겠습니까?")) return;
-                                try {
-                                    const { doc, deleteDoc, getFirestore } = await import("firebase/firestore");
-                                    const db = getFirestore();
-                                    await deleteDoc(doc(db, "users", user.uid));
-                                    await user.delete();
-                                } catch (e) {
-                                    console.error("Cleanup failed", e);
-                                    import("../firebase").then(m => m.auth.signOut());
-                                }
-                            }}
-                            className="w-full bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl text-lg hover:bg-gray-200 hover:text-gray-700 transition-all"
-                        >
-                            가입 취소
+                        <button type="button" onClick={async () => {
+                            if (!confirm("정말 가입을 취소하시겠습니까?")) return;
+                            try {
+                                const { doc, deleteDoc, getFirestore } = await import("firebase/firestore");
+                                const db = getFirestore();
+                                await deleteDoc(doc(db, "users", user.uid));
+                                await user.delete();
+                            } catch (e) {
+                                console.error("Cleanup failed", e);
+                                import("../firebase").then(m => m.auth.signOut());
+                            }
+                        }} className="w-full bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl text-lg hover:bg-gray-200 hover:text-gray-700 transition-all">
+                            가입 취소 / 로그아웃
                         </button>
                     </div>
                 </div>
@@ -109,24 +119,23 @@ export default function Home() {
         );
     }
 
-    // 4. Logged In BUT No Profile (Kakao New User) -> Show Nickname Setup
+    // 4. Nickname Setup Check
     if (user && !userProfile) {
         return <NicknameSetup />;
     }
 
-    // 4. Authenticated & Verified Dashboard (Tabbed)
+    // 5. Dashboard
     return (
         <main className="min-h-screen bg-slate-50 text-black font-sans pb-32">
-            {/* Mobile Header (German Theme) */}
+            {/* Header */}
             <header className="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-4 border-b border-gray-100 flex justify-between items-center shadow-sm">
                 <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-1">
                     🇩🇪 Germa-Niche
                 </h1>
                 <div className="flex items-center gap-3">
                     <div className="text-[10px] font-bold bg-black text-[#FFCE00] px-3 py-1 rounded-full border border-gray-800 mr-2">
-                        D-14
+                        {dDay}
                     </div>
-                    {/* Header Icons */}
                     <button onClick={() => setShowMembers(true)} className="text-gray-800 hover:text-black transition-all">
                         <Users size={22} strokeWidth={2.5} />
                     </button>
@@ -134,10 +143,7 @@ export default function Home() {
                         <MessageSquare size={22} strokeWidth={2.5} />
                         <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#DD0000] rounded-full border-2 border-white"></span>
                     </button>
-                    <button
-                        onClick={() => import("../firebase").then(m => m.auth.signOut())}
-                        className="text-gray-300 hover:text-red-500 transition-colors ml-1"
-                    >
+                    <button onClick={() => import("../firebase").then(m => m.auth.signOut())} className="text-gray-300 hover:text-red-500 transition-colors ml-1">
                         <LogOut size={20} />
                     </button>
                 </div>
@@ -146,16 +152,30 @@ export default function Home() {
             {/* Dynamic Content Area */}
             <div className="max-w-md mx-auto px-4 mt-6">
 
-                {/* GUIDE TAB */}
+                {/* 1. GUIDE TAB (City Guide + Phrasebook) */}
                 {activeTab === "guide" && (
-                    <div className="space-y-8 animate-fadeIn">
-                        <section>
-                            <CityGuide activeLeg={activeLeg} />
-                        </section>
+                    <div className="animate-fadeIn">
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-white border border-gray-200 p-1 rounded-full flex gap-1 shadow-sm">
+                                <button
+                                    onClick={() => setGuideMode("city")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${guideMode === "city" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <MapIcon size={14} /> 도시 가이드
+                                </button>
+                                <button
+                                    onClick={() => setGuideMode("phrase")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${guideMode === "phrase" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <Languages size={14} /> 회화 사전
+                                </button>
+                            </div>
+                        </div>
+                        {guideMode === "city" ? <CityGuide activeLeg={activeLeg} /> : <GermanPhrasebook />}
                     </div>
                 )}
 
-                {/* MEMO TAB */}
+                {/* 2. MEMO TAB */}
                 {activeTab === "memo" && (
                     <div className="animate-fadeIn">
                         <div className="mb-4">
@@ -166,21 +186,69 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* ITINERARY TAB */}
-                {activeTab === "itinerary" && (
+                {/* 3. LOG TAB (Simple Log + Gallery + Diary) */}
+                {activeTab === "log" && (
                     <div className="animate-fadeIn">
-                        <ItineraryTabs activeTab={activeLeg} onTabChange={setActiveLeg} />
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-white border border-gray-200 p-1 rounded-full flex gap-1 shadow-sm">
+                                <button
+                                    onClick={() => setLogMode("beer")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${logMode === "beer" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <Zap size={14} /> 간단 기록
+                                </button>
+                                <button
+                                    onClick={() => setLogMode("gallery")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${logMode === "gallery" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <ImageIcon size={14} /> 추억 갤러리
+                                </button>
+                                <button
+                                    onClick={() => setLogMode("diary")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${logMode === "diary" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <Book size={14} /> 일기장
+                                </button>
+                            </div>
+                        </div>
+                        {logMode === "beer" ? (
+                            <DailyLog />
+                        ) : logMode === "gallery" ? (
+                            <TravelLog />
+                        ) : (
+                            <PrivateDiary />
+                        )}
                     </div>
                 )}
 
-                {/* TRANSPORT TAB */}
+                {/* 4. TRANSPORT TAB (Info + Itinerary) */}
                 {activeTab === "transport" && (
                     <div className="animate-fadeIn">
-                        <TransportComparison />
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-white border border-gray-200 p-1 rounded-full flex gap-1 shadow-sm">
+                                <button
+                                    onClick={() => setTransportMode("itinerary")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${transportMode === "itinerary" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <Calendar size={14} /> 여행 일정
+                                </button>
+                                <button
+                                    onClick={() => setTransportMode("info")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${transportMode === "info" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
+                                >
+                                    <Bus size={14} /> 교통 정보
+                                </button>
+                            </div>
+                        </div>
+                        {transportMode === "itinerary" ? (
+                            <ItineraryTabs activeTab={activeLeg} onTabChange={setActiveLeg} />
+                        ) : (
+                            <TransportComparison />
+                        )}
                     </div>
                 )}
 
-                {/* MAP TAB */}
+                {/* 5. MAP TAB */}
                 {activeTab === "map" && (
                     <div className="animate-fadeIn">
                         <LBSDiscovery />
@@ -190,13 +258,11 @@ export default function Home() {
 
             <AIOptimizer />
 
-            {/* Modals */}
             <AnimatePresence>
                 {showChat && <GroupChat onClose={() => setShowChat(false)} />}
                 {showMembers && <MemberInfo onClose={() => setShowMembers(false)} />}
             </AnimatePresence>
 
-            {/* Bottom Navigation */}
             <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
         </main>
     );

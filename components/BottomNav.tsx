@@ -2,7 +2,7 @@
 
 import { Map, Train, Calendar, BookOpen, NotebookPen, MessageCircle } from "lucide-react";
 
-type Tab = "guide" | "memo" | "itinerary" | "transport" | "map";
+type Tab = "guide" | "memo" | "log" | "transport" | "map";
 
 interface BottomNavProps {
     activeTab: Tab;
@@ -13,7 +13,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
     const navItems = [
         { id: "guide", label: "가이드", icon: BookOpen },
         { id: "memo", label: "메모", icon: NotebookPen },
-        { id: "itinerary", label: "일정", icon: Calendar },
+        { id: "log", label: "기록", icon: Calendar }, // Renamed from itinerary
         { id: "transport", label: "이동", icon: Train },
         { id: "map", label: "지도", icon: Map },
     ] as const;

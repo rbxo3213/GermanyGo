@@ -34,3 +34,12 @@ body {
 .scroll-smooth {
   -webkit-overflow-scrolling: touch;
 }
+
+/* Hide scrollbar utility */
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
