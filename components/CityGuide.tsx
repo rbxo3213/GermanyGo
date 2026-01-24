@@ -1,4 +1,3 @@
-
 "use client";
 
 import { motion } from "framer-motion";
@@ -37,7 +36,6 @@ const CITY_COORDS: { [key: string]: { lat: number; lng: number } } = {
     "Cologne": { lat: 50.9375, lng: 6.9603 },
 };
 
-// --- Config: Themes only (Weather removed) ---
 const cityThemes: { [key: string]: string } = {
     leg1: "from-blue-500 to-cyan-400",
     leg2: "from-orange-500 to-amber-400",
@@ -56,7 +54,6 @@ const openGoogleMap = (place: PlaceInfo) => {
     window.open(url, '_blank');
 };
 
-// WMO Weather Code to Korean Description
 const getWeatherDesc = (code: number) => {
     if (code === 0) return "맑음 ☀️";
     if (code <= 3) return "구름 조금 ☁️";
@@ -68,7 +65,6 @@ const getWeatherDesc = (code: number) => {
     return "흐림";
 };
 
-// Weather Icon Component
 const WeatherIcon = ({ code }: { code: number }) => {
     if (code === 0 || code === 1) return <Sun size={28} className="text-orange-400" />;
     if (code <= 48) return <Cloud size={28} className="text-gray-400" />;
@@ -85,12 +81,10 @@ export default function CityGuide({ activeLeg }: Props) {
     const cityName = LEG_MAPPING[activeLeg] || "Frankfurt";
     const themeColor = cityThemes[activeLeg] || "from-blue-500 to-cyan-400";
 
-    // GPS State
     const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
     const [useGPS, setUseGPS] = useState(false);
     const [gpsError, setGpsError] = useState(false);
 
-    // Data State
     const [data, setData] = useState<CityDataItem>({
         weather: { temp: "--", code: 0, desc: "로딩 중..." },
         food: { items: [], loading: false },
@@ -102,26 +96,49 @@ export default function CityGuide({ activeLeg }: Props) {
     // 1. GPS Tracking
     useEffect(() => {
         if (!navigator.geolocation) return;
-        const options = { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 };
+
+        const options = {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+        };
+
         const success = (pos: GeolocationPosition) => {
-            setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            const newLat = pos.coords.latitude;
+            const newLng = pos.coords.longitude;
+
+            setLocation(prev => {
+                if (prev) {
+                    // 🚀 핵심 수정: 소수점 2자리(약 1.1km)까지만 비교
+                    const prevLatFixed = prev.lat.toFixed(2);
+                    const prevLngFixed = prev.lng.toFixed(2);
+                    const newLatFixed = newLat.toFixed(2);
+                    const newLngFixed = newLng.toFixed(2);
+
+                    // 1km 내외 이동이면 상태 업데이트 안 함 -> API 호출 원천 차단
+                    if (prevLatFixed === newLatFixed && prevLngFixed === newLngFixed) {
+                        return prev;
+                    }
+                }
+                return { lat: newLat, lng: newLng };
+            });
             setGpsError(false);
         };
+
         const error = (err: GeolocationPositionError) => {
             console.warn("GPS Fail:", err.message);
             setGpsError(true);
         };
+
         const watcher = navigator.geolocation.watchPosition(success, error, options);
         return () => navigator.geolocation.clearWatch(watcher);
     }, []);
 
-    // 2. Fetch Data (Weather + Places)
+    // 2. Fetch Data
     useEffect(() => {
-        // Theme Update
         setData(prev => ({ ...prev, themeColor }));
 
         const fetchAllData = async () => {
-            // Set Loading
             setData(prev => ({
                 ...prev,
                 food: { ...prev.food, loading: true },
@@ -129,7 +146,6 @@ export default function CityGuide({ activeLeg }: Props) {
                 market: { ...prev.market, loading: true },
             }));
 
-            // Determine Coordinates for Weather & Places
             let lat = CITY_COORDS[cityName]?.lat;
             let lng = CITY_COORDS[cityName]?.lng;
 
@@ -138,7 +154,7 @@ export default function CityGuide({ activeLeg }: Props) {
                 lng = location.lng;
             }
 
-            // A. Fetch Weather (Open-Meteo API - Free, No Key)
+            // A. Weather
             try {
                 if (lat && lng) {
                     const weatherRes = await fetch(
@@ -157,18 +173,16 @@ export default function CityGuide({ activeLeg }: Props) {
                         }));
                     }
                 }
-            } catch (e) {
-                console.error("Weather Fetch Error", e);
-            }
+            } catch (e) { console.error("Weather Error", e); }
 
-            // B. Fetch Places (Google Maps API)
+            // B. Places
             try {
-                // If GPS mode is on but no location yet, skip places fetch
                 if (useGPS && !location) return;
 
                 const baseQuery = useGPS ? "" : `${cityName} `;
+                // 요청 시에도 2자리로 잘라서 보냄
                 const locationParams = useGPS && location
-                    ? `&lat=${location.lat}&lng=${location.lng}&radius=2000`
+                    ? `&lat=${location.lat.toFixed(2)}&lng=${location.lng.toFixed(2)}&radius=2000`
                     : "";
 
                 const queries = [
@@ -182,20 +196,25 @@ export default function CityGuide({ activeLeg }: Props) {
                         const res = await fetch(`/api/places?query=${encodeURIComponent(q)}${locationParams}`);
                         if (!res.ok) throw new Error("Server Error");
                         const json = await res.json();
+
+                        if (json._debug) {
+                            const { isCacheHit, duration, query } = json._debug;
+                            if (isCacheHit) console.log(`%c📦 [CACHE] ${duration}ms - ${query}`, 'color: green');
+                            else console.log(`%c💸 [API] ${duration}ms - ${query}`, 'color: red');
+                        }
+
                         return { key, items: json.results?.slice(0, 3) || [] };
                     })
                 );
 
                 setData(prev => {
                     const next = { ...prev };
-                    results.forEach(({ key, items }) => {
-                        (next as any)[key] = { items, loading: false };
-                    });
+                    results.forEach(({ key, items }) => { (next as any)[key] = { items, loading: false }; });
                     return next;
                 });
 
             } catch (error) {
-                console.error("Places Fetch Error:", error);
+                console.error("Fetch Error:", error);
                 setData(prev => ({
                     ...prev,
                     food: { ...prev.food, loading: false },
@@ -215,7 +234,6 @@ export default function CityGuide({ activeLeg }: Props) {
                 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
             `}</style>
 
-            {/* Header */}
             <div className="flex justify-between items-end px-1">
                 <div>
                     <div className="flex items-center gap-2 mb-1">
@@ -241,7 +259,6 @@ export default function CityGuide({ activeLeg }: Props) {
                 <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${data.themeColor} blur-2xl opacity-60`} />
             </div>
 
-            {/* Weather Widget (Real Data) */}
             <motion.div
                 className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100/80 flex items-center justify-between relative overflow-hidden"
                 whileHover={{ scale: 1.01 }}
@@ -258,7 +275,6 @@ export default function CityGuide({ activeLeg }: Props) {
                 </div>
             </motion.div>
 
-            {/* Carousels */}
             <div className="space-y-8">
                 <PlaceCarousel title="현지 맛집" icon={<Utensils size={18} className="text-orange-500" />} data={data.food} />
                 <PlaceCarousel title="주요 명소" icon={<Camera size={18} className="text-purple-500" />} data={data.spot} />
@@ -274,7 +290,6 @@ export default function CityGuide({ activeLeg }: Props) {
     );
 }
 
-// Sub-component (Same as before)
 function PlaceCarousel({ title, icon, data }: { title: string, icon: React.ReactNode, data: CategoryData }) {
     return (
         <div className="space-y-4">

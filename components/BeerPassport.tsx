@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "../firebase";
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, limit } from "firebase/firestore";
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, limit, startAfter, getDocs } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
-import { Star, Plus, Camera, Trash2, X, ChevronRight, User, Zap, Coffee, Edit3 } from "lucide-react"; // Generic icons
+import { Star, Plus, Camera, Trash2, X, ChevronRight, User, Zap, Coffee, Edit3, Loader2 } from "lucide-react"; // Generic icons
 import ImageCropModal from "./ImageCropModal"; // Image Editor
 
 interface DailyLogItem {
@@ -25,6 +25,11 @@ export default function DailyLog() { // Renamed from BeerPassport
     const [isAdding, setIsAdding] = useState(false);
     const [selectedLog, setSelectedLog] = useState<DailyLogItem | null>(null);
 
+    // Pagination
+    const [lastDoc, setLastDoc] = useState<any>(null);
+    const [hasMore, setHasMore] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+
     // Form State
     const [name, setName] = useState("");
     const [rating, setRating] = useState(5);
@@ -35,13 +40,37 @@ export default function DailyLog() { // Renamed from BeerPassport
     const [finalImg, setFinalImg] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
 
-    // 1. Fetch Logs (Still using 'beers' collection to preserve data)
+    // 1. Fetch Logs (Paginated)
+    const fetchLogs = async (isLoadMore = false) => {
+        if (!hasMore && isLoadMore) return;
+        setIsLoading(true);
+        try {
+            let q = query(collection(db, "beers"), orderBy("createdAt", "desc"), limit(10));
+
+            if (isLoadMore && lastDoc) {
+                q = query(q, startAfter(lastDoc));
+            }
+
+            const snap = await getDocs(q);
+            const newLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as DailyLogItem));
+
+            if (isLoadMore) {
+                setLogs(prev => [...prev, ...newLogs]);
+            } else {
+                setLogs(newLogs);
+            }
+
+            setLastDoc(snap.docs[snap.docs.length - 1]);
+            setHasMore(snap.docs.length === 10);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const q = query(collection(db, "beers"), orderBy("createdAt", "desc"), limit(50));
-        const unsubscribe = onSnapshot(q, (snap) => {
-            setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as DailyLogItem)));
-        });
-        return () => unsubscribe();
+        fetchLogs(false);
     }, []);
 
     // Reset Form
@@ -70,6 +99,8 @@ export default function DailyLog() { // Renamed from BeerPassport
                 createdAt: serverTimestamp()
             });
             closeForm();
+            // Refresh list
+            fetchLogs(false);
         } catch (error) {
             console.error(error);
             alert("저장 실패");
@@ -166,15 +197,17 @@ export default function DailyLog() { // Renamed from BeerPassport
                 ))}
             </div>
 
-            {/* Floating Add Button */}
-            <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setIsAdding(true)}
-                className="fixed bottom-24 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-xl flex items-center justify-center z-40 hover:bg-black transition-colors"
-            >
-                <Plus size={28} />
-            </motion.button>
+            {/* Load More Button */}
+            {hasMore && (
+                <button
+                    onClick={() => fetchLogs(true)}
+                    disabled={isLoading}
+                    className="w-full py-4 rounded-xl text-xs font-bold text-gray-400 hover:text-slate-900 transition-colors flex items-center justify-center gap-2 mt-4"
+                >
+                    {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                    더 보기
+                </button>
+            )}
 
             {/* Add Modal */}
             <AnimatePresence>

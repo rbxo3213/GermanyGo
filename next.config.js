@@ -7,6 +7,41 @@ const withPWA = require("@ducanh2912/next-pwa").default({
     disable: process.env.NODE_ENV === "development",
     workboxOptions: {
         disableDevLogs: true,
+        runtimeCaching: [
+            {
+                urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,
+                handler: 'CacheFirst',
+                options: {
+                    cacheName: 'firebase-storage-images',
+                    expiration: {
+                        maxEntries: 50,
+                        maxAgeSeconds: 60 * 60 * 24 * 30, // 30 Days
+                    },
+                },
+            },
+            {
+                urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/i,
+                handler: 'StaleWhileRevalidate',
+                options: {
+                    cacheName: 'static-image-assets',
+                    expiration: {
+                        maxEntries: 64,
+                        maxAgeSeconds: 24 * 60 * 60, // 24 Hours
+                    },
+                },
+            },
+            {
+                urlPattern: /^https:\/\/api\.open-meteo\.com\/.*/i,
+                handler: 'NetworkFirst',
+                options: {
+                    cacheName: 'weather-api',
+                    expiration: {
+                        maxEntries: 16,
+                        maxAgeSeconds: 60 * 60, // 1 Hour
+                    },
+                },
+            },
+        ],
     },
 });
 

@@ -83,7 +83,7 @@ async function getCroppedImg(
     // Resize logic
     let targetWidth = pixelCrop.width;
     let targetHeight = pixelCrop.height;
-    const MAX_DIMENSION = 1024;
+    const MAX_DIMENSION = 600; // Optimized for Data Saving
 
     if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
         const ratio = targetWidth / targetHeight;
@@ -112,8 +112,8 @@ async function getCroppedImg(
         targetHeight // Destination height
     );
 
-    // Compress to JPEG 0.7
-    return canvas.toDataURL("image/jpeg", 0.7);
+    // Compress to JPEG 0.5 (Data Saver Mode)
+    return canvas.toDataURL("image/jpeg", 0.5);
 }
 
 export default function ImageCropModal({ imageSrc, aspect: initialAspect = 1, onCancel, onCropComplete }: ImageCropModalProps) {

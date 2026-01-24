@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "../firebase";
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp, updateDoc, doc, getDocs, getDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp, updateDoc, doc, getDocs, getDoc, deleteDoc, arrayUnion } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
 import { X, ArrowRight, Plus, Trophy, Trash2, Image as ImageIcon } from "lucide-react";
 import GameRoulette from "./GameRoulette";
@@ -80,10 +80,17 @@ export default function GroupChat({ onClose }: GroupChatProps) {
                 const m = { id: d.id, ...data } as Message;
                 msgs.push(m);
                 // Mark as read
+                // Mark as read (Optimized & Safe)
                 if (user && user.uid && (!m.readBy || !m.readBy.includes(user.uid))) {
+                    // Use arrayUnion for atomic updates to avoid race conditions
+                    // Suppress 'No document to update' errors (benign race with deletion)
                     updateDoc(doc(db, "messages", d.id), {
-                        readBy: [...(m.readBy || []), user.uid]
-                    }).catch(e => console.error("Read update error", e));
+                        readBy: arrayUnion(user.uid)
+                    }).catch(e => {
+                        if (e.code !== 'not-found' && !e.message.includes("No document to update")) {
+                            console.error("Read update error", e);
+                        }
+                    });
                 }
             });
             setMessages(msgs);

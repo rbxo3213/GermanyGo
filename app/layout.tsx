@@ -10,6 +10,9 @@ export const metadata: Metadata = {
         statusBarStyle: 'default',
         title: 'Germa-Niche',
     },
+    other: {
+        "mobile-web-app-capable": "yes",
+    },
     formatDetection: {
         telephone: false,
     },

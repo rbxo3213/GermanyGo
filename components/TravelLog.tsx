@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "../firebase";
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, updateDoc, limit } from "firebase/firestore";
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, updateDoc, limit, startAfter, getDocs } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
 import { Camera, Trash2, X, ChevronRight, User, Plus, MapPin, Download, Star, Filter, Utensils, Mountain, ShoppingBag, BedDouble, TentTree, MoreHorizontal, Loader2, Trophy, Backpack, Compass } from "lucide-react";
 import ImageCropModal from "./ImageCropModal"; // New
@@ -56,16 +56,44 @@ export default function TravelLog() {
     const [tempImages, setTempImages] = useState<string[]>([]);
     const [isUploading, setIsUploading] = useState(false);
 
+    // Pagination
+    const [lastDoc, setLastDoc] = useState<any>(null);
+    const [hasMore, setHasMore] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
+
     // Image Crop State
     const [originalImg, setOriginalImg] = useState<string | null>(null);
 
+    const fetchLogs = async (isLoadMore = false) => {
+        if (!hasMore && isLoadMore) return;
+        setIsLoading(true);
+        try {
+            let q = query(collection(db, "travel_logs"), orderBy("createdAt", "desc"), limit(10));
+
+            if (isLoadMore && lastDoc) {
+                q = query(q, startAfter(lastDoc));
+            }
+
+            const snap = await getDocs(q);
+            const newLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TravelLogData));
+
+            if (isLoadMore) {
+                setLogs(prev => [...prev, ...newLogs]);
+            } else {
+                setLogs(newLogs);
+            }
+
+            setLastDoc(snap.docs[snap.docs.length - 1]);
+            setHasMore(snap.docs.length === 10);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const q = query(collection(db, "travel_logs"), orderBy("createdAt", "desc"), limit(50));
-        const unsubscribe = onSnapshot(q, (snap) => {
-            const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as TravelLogData));
-            setLogs(list);
-        });
-        return () => unsubscribe();
+        fetchLogs(false);
     }, []);
 
     const members = useMemo(() => {
@@ -152,6 +180,8 @@ export default function TravelLog() {
                 ratings: {}
             });
             resetForm();
+            // Refresh list
+            fetchLogs(false);
         } catch (error) { console.error(error); alert("저장 실패"); } finally { setIsUploading(false); }
     };
 
@@ -164,6 +194,11 @@ export default function TravelLog() {
         if (!user || !selectedLog) return;
         const logRef = doc(db, "travel_logs", selectedLog.id);
         await updateDoc(logRef, { [`ratings.${user.uid}`]: rating });
+        // Optimistic update
+        setLogs(prev => prev.map(l => l.id === selectedLog.id ? {
+            ...l,
+            ratings: { ...l.ratings, [user.uid]: rating }
+        } : l));
     };
 
     const getAvgRating = (ratings?: { [uid: string]: number }) => {
@@ -280,6 +315,18 @@ export default function TravelLog() {
                     );
                 })}
             </div>
+
+            {/* Load More Button */}
+            {hasMore && (
+                <button
+                    onClick={() => fetchLogs(true)}
+                    disabled={isLoading}
+                    className="w-full py-4 rounded-xl text-xs font-bold text-gray-400 hover:text-slate-900 transition-colors flex items-center justify-center gap-2 mt-4"
+                >
+                    {isLoading ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                    더 보기
+                </button>
+            )}
 
             {/* --- Add Modal --- */}
             <AnimatePresence>
@@ -449,6 +496,7 @@ export default function TravelLog() {
                                             if (confirm("이 기록을 삭제하시겠습니까?")) {
                                                 await deleteDoc(doc(db, "travel_logs", selectedLog.id));
                                                 setSelectedLogId(null);
+                                                setLogs(prev => prev.filter(l => l.id !== selectedLog.id));
                                             }
                                         }}
                                         className="w-full py-3.5 bg-red-50 text-red-500 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"
