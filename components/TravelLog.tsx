@@ -55,6 +55,7 @@ export default function TravelLog() {
     const [category, setCategory] = useState("food");
     const [tempImages, setTempImages] = useState<string[]>([]);
     const [isUploading, setIsUploading] = useState(false);
+    const [editId, setEditId] = useState<string | null>(null);
 
     // Pagination
     const [lastDoc, setLastDoc] = useState<any>(null);
@@ -170,23 +171,49 @@ export default function TravelLog() {
         if (!user || !title) return;
         setIsUploading(true);
         try {
-            await addDoc(collection(db, "travel_logs"), {
+            const data: any = {
                 title, location, note, category,
                 coords: currentCoords,
                 images: tempImages,
-                uid: user.uid,
-                nickname: userProfile?.nickname || "여행자",
-                createdAt: serverTimestamp(),
-                ratings: {}
-            });
+            };
+
+            if (editId) {
+                // Update
+                await updateDoc(doc(db, "travel_logs", editId), data);
+                // Optimistic Update
+                setLogs(prev => prev.map(l => l.id === editId ? { ...l, ...data } : l));
+                if (selectedLogId === editId) {
+                    // Force refresh or just let optimistic update handle list, detail uses selectedLog from logs
+                }
+            } else {
+                // Create
+                data.uid = user.uid;
+                data.nickname = userProfile?.nickname || "여행자";
+                data.createdAt = serverTimestamp();
+                data.ratings = {};
+                await addDoc(collection(db, "travel_logs"), data);
+                // Refresh list
+                fetchLogs(false);
+            }
             resetForm();
-            // Refresh list
-            fetchLogs(false);
         } catch (error) { console.error(error); alert("저장 실패"); } finally { setIsUploading(false); }
+    };
+
+    const handleEdit = (log: TravelLogData) => {
+        setEditId(log.id);
+        setTitle(log.title);
+        setLocation(log.location);
+        setNote(log.note);
+        setCategory(log.category);
+        setTempImages(log.images || []);
+        setCurrentCoords(log.coords || null);
+        setSelectedLogId(null);
+        setIsAdding(true);
     };
 
     const resetForm = () => {
         setIsAdding(false);
+        setEditId(null);
         setTitle(""); setLocation(""); setCurrentCoords(null); setNote(""); setTempImages([]); setCategory("food"); setOriginalImg(null);
     };
 
@@ -336,7 +363,7 @@ export default function TravelLog() {
 
                         <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} className="bg-white w-full max-w-sm rounded-t-[2rem] sm:rounded-[2rem] p-6 shadow-2xl relative z-10 max-h-[90vh] overflow-y-auto">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-xl font-black text-slate-900">새 로그 작성</h3>
+                                <h3 className="text-xl font-black text-slate-900">{editId ? "로그 수정" : "새 로그 작성"}</h3>
                                 <button onClick={resetForm}><X size={24} /></button>
                             </div>
                             <form onSubmit={handleSubmit} className="space-y-4">
@@ -491,18 +518,26 @@ export default function TravelLog() {
                                     {selectedLog.note}
                                 </div>
                                 {user?.uid === selectedLog.uid && (
-                                    <button
-                                        onClick={async () => {
-                                            if (confirm("이 기록을 삭제하시겠습니까?")) {
-                                                await deleteDoc(doc(db, "travel_logs", selectedLog.id));
-                                                setSelectedLogId(null);
-                                                setLogs(prev => prev.filter(l => l.id !== selectedLog.id));
-                                            }
-                                        }}
-                                        className="w-full py-3.5 bg-red-50 text-red-500 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"
-                                    >
-                                        <Trash2 size={16} /> 삭제하기
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => handleEdit(selectedLog)}
+                                            className="flex-1 py-3.5 bg-blue-50 text-blue-500 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors"
+                                        >
+                                            <Compass size={16} /> 수정
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                if (confirm("이 기록을 삭제하시겠습니까?")) {
+                                                    await deleteDoc(doc(db, "travel_logs", selectedLog.id));
+                                                    setSelectedLogId(null);
+                                                    setLogs(prev => prev.filter(l => l.id !== selectedLog.id));
+                                                }
+                                            }}
+                                            className="flex-1 py-3.5 bg-red-50 text-red-500 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"
+                                        >
+                                            <Trash2 size={16} /> 삭제
+                                        </button>
+                                    </div>
                                 )}
                             </div>
                         </motion.div>

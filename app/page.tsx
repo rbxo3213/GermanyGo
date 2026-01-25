@@ -13,7 +13,7 @@ import { MessageSquare, Users, LogOut, Zap, Image as ImageIcon, Map as MapIcon, 
 const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
 const ItineraryTabs = dynamic(() => import("../components/ItineraryTabs"), { loading: () => <TabSkeleton /> });
 const TransportComparison = dynamic(() => import("../components/TransportComparison"), { loading: () => <TabSkeleton /> });
-const DailyLog = dynamic(() => import("../components/BeerPassport"), { loading: () => <TabSkeleton />, ssr: false });
+const DailyLog = dynamic(() => import("../components/DailyLog"), { loading: () => <TabSkeleton />, ssr: false });
 const CityGuide = dynamic(() => import("../components/CityGuide"), { loading: () => <TabSkeleton /> });
 const GermanPhrasebook = dynamic(() => import("../components/GermanPhrasebook"), { loading: () => <TabSkeleton />, ssr: false });
 const TravelLog = dynamic(() => import("../components/TravelLog"), { loading: () => <TabSkeleton />, ssr: false });

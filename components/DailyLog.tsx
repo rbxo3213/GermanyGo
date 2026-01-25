@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { db } from "../firebase";
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, limit, startAfter, getDocs } from "firebase/firestore";
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, limit, startAfter, getDocs, updateDoc } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
 import { Star, Plus, Camera, Trash2, X, ChevronRight, User, Zap, Coffee, Edit3, Loader2 } from "lucide-react"; // Generic icons
 import ImageCropModal from "./ImageCropModal"; // Image Editor
@@ -24,6 +24,8 @@ export default function DailyLog() { // Renamed from BeerPassport
     const [logs, setLogs] = useState<DailyLogItem[]>([]);
     const [isAdding, setIsAdding] = useState(false);
     const [selectedLog, setSelectedLog] = useState<DailyLogItem | null>(null);
+    const [editId, setEditId] = useState<string | null>(null);
+    const [isDetailEditing, setIsDetailEditing] = useState(false);
 
     // Pagination
     const [lastDoc, setLastDoc] = useState<any>(null);
@@ -77,6 +79,7 @@ export default function DailyLog() { // Renamed from BeerPassport
     const closeForm = () => {
         setIsAdding(false);
         setTimeout(() => {
+            setEditId(null);
             setName("");
             setRating(5);
             setNote("");
@@ -85,25 +88,81 @@ export default function DailyLog() { // Renamed from BeerPassport
         }, 200);
     };
 
-    // 2. Add Log
+    // 2. Add / Edit Log
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user || !name) return;
         setIsUploading(true);
         try {
-            await addDoc(collection(db, "beers"), {
+            const data: any = {
                 name, rating, note,
                 imageUrl: finalImg || "",
-                uid: user.uid,
-                nickname: userProfile?.nickname || "익명",
-                createdAt: serverTimestamp()
-            });
+            };
+
+            if (editId) {
+                // Update
+                await updateDoc(doc(db, "beers", editId), data);
+                // Optimistic UI update
+                setLogs(prev => prev.map(log => log.id === editId ? { ...log, ...data } : log));
+                if (selectedLog?.id === editId) {
+                    setSelectedLog(prev => prev ? { ...prev, ...data } : null);
+                }
+            } else {
+                // Create
+                data.uid = user.uid;
+                data.nickname = userProfile?.nickname || "익명";
+                data.createdAt = serverTimestamp();
+                await addDoc(collection(db, "beers"), data);
+                // Refresh list
+                fetchLogs(false);
+            }
             closeForm();
-            // Refresh list
-            fetchLogs(false);
         } catch (error) {
             console.error(error);
             alert("저장 실패");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    // Inline Edit Handlers
+    const startInlineEdit = () => {
+        if (!selectedLog) return;
+        setName(selectedLog.name);
+        setRating(selectedLog.rating);
+        setNote(selectedLog.note || "");
+        setFinalImg(selectedLog.imageUrl || null);
+        setIsDetailEditing(true);
+    };
+
+    const cancelInlineEdit = () => {
+        setIsDetailEditing(false);
+        // Clean up
+        setName("");
+        setRating(5);
+        setNote("");
+        setFinalImg(null);
+    };
+
+    const handleInlineUpdate = async () => {
+        if (!selectedLog || !user) return;
+        setIsUploading(true);
+        try {
+            const data = {
+                name, rating, note,
+                imageUrl: finalImg || "",
+            };
+            await updateDoc(doc(db, "beers", selectedLog.id), data);
+
+            // Update local state
+            const updatedLog = { ...selectedLog, ...data };
+            setSelectedLog(updatedLog); // Update Detail View
+            setLogs(prev => prev.map(log => log.id === selectedLog.id ? { ...log, ...data } : log)); // Update List
+
+            setIsDetailEditing(false);
+        } catch (e) {
+            console.error(e);
+            alert("수정 실패");
         } finally {
             setIsUploading(false);
         }
@@ -233,7 +292,7 @@ export default function DailyLog() { // Renamed from BeerPassport
                         >
                             <div className="flex justify-between items-center mb-6">
                                 <div>
-                                    <h3 className="text-2xl font-black text-slate-900">간단 기록</h3>
+                                    <h3 className="text-2xl font-black text-slate-900">{editId ? "기록 수정" : "간단 기록"}</h3>
                                     <p className="text-gray-400 text-xs font-bold mt-1">빠르고 가볍게 일상을 기록하세요</p>
                                 </div>
                                 <button onClick={closeForm} className="p-2 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors">
@@ -320,51 +379,139 @@ export default function DailyLog() { // Renamed from BeerPassport
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             className="bg-white w-full max-w-sm rounded-[2rem] overflow-hidden shadow-2xl relative z-20"
                         >
-                            <div className="h-64 bg-gray-100 relative">
-                                {selectedLog.imageUrl ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={selectedLog.imageUrl} alt={selectedLog.name} className="w-full h-full object-cover" />
+                            <div className="h-64 bg-gray-100 relative group">
+                                {isDetailEditing ? (
+                                    <>
+                                        {finalImg ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={finalImg} alt="Editing" className="w-full h-full object-cover opacity-50" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-400">
+                                                <Camera size={48} />
+                                            </div>
+                                        )}
+                                        <label className="absolute inset-0 flex flex-col items-center justify-center cursor-pointer hover:bg-black/10 transition-colors">
+                                            <div className="bg-slate-900/80 text-white px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2 shadow-lg backdrop-blur-sm">
+                                                <Camera size={16} /> 사진 변경
+                                            </div>
+                                            <input type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+                                        </label>
+                                    </>
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                        <Coffee size={64} />
-                                    </div>
+                                    <>
+                                        {selectedLog.imageUrl ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={selectedLog.imageUrl} alt={selectedLog.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                                <Coffee size={64} />
+                                            </div>
+                                        )}
+                                    </>
                                 )}
-                                <button
-                                    onClick={() => setSelectedLog(null)}
-                                    className="absolute top-4 right-4 p-2 bg-black/30 text-white rounded-full backdrop-blur-md hover:bg-black/50 transition-colors"
-                                >
-                                    <X size={20} />
-                                </button>
+
+                                {!isDetailEditing && (
+                                    <button
+                                        onClick={() => setSelectedLog(null)}
+                                        className="absolute top-4 right-4 p-2 bg-black/30 text-white rounded-full backdrop-blur-md hover:bg-black/50 transition-colors"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                )}
+
                                 <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-md text-white px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5">
                                     <User size={12} /> {selectedLog.nickname}
                                 </div>
                             </div>
                             <div className="p-8">
                                 <div className="flex justify-between items-start mb-4">
-                                    <h3 className="text-2xl font-black text-slate-900 leading-tight">{selectedLog.name}</h3>
-                                    <div className="flex gap-0.5 bg-yellow-50 px-2 py-1 rounded-lg">
+                                    {isDetailEditing ? (
+                                        <div className="w-full mr-4">
+                                            <input
+                                                type="text"
+                                                value={name}
+                                                onChange={e => setName(e.target.value)}
+                                                className="w-full text-2xl font-black text-slate-900 border-b-2 border-slate-200 focus:border-slate-900 outline-none bg-transparent py-1"
+                                                placeholder="제목"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <h3 className="text-2xl font-black text-slate-900 leading-tight">{selectedLog.name}</h3>
+                                    )}
+
+                                    <div className="flex gap-0.5 bg-yellow-50 px-2 py-1 rounded-lg flex-shrink-0">
                                         {[...Array(5)].map((_, i) => (
-                                            <Star key={i} size={14} className={i < selectedLog.rating ? "text-[#FFCE00] fill-[#FFCE00]" : "text-gray-200 fill-gray-200"} />
+                                            <button
+                                                key={i}
+                                                disabled={!isDetailEditing}
+                                                onClick={() => setRating(i + 1)}
+                                                className={`${isDetailEditing ? "cursor-pointer active:scale-90" : "cursor-default"} transition-transform`}
+                                            >
+                                                <Star key={i} size={14} className={i < (isDetailEditing ? rating : selectedLog.rating) ? "text-[#FFCE00] fill-[#FFCE00]" : "text-gray-200 fill-gray-200"} />
+                                            </button>
                                         ))}
                                     </div>
                                 </div>
-                                <div className="bg-gray-50 rounded-2xl p-5 mb-6">
-                                    <p className="text-slate-600 text-sm font-medium leading-relaxed whitespace-pre-wrap">
-                                        {selectedLog.note || "작성된 노트가 없습니다."}
-                                    </p>
+
+                                <div className={`bg-gray-50 rounded-2xl p-5 mb-6 ${isDetailEditing ? "ring-2 ring-blue-100" : ""}`}>
+                                    {isDetailEditing ? (
+                                        <textarea
+                                            value={note}
+                                            onChange={e => setNote(e.target.value)}
+                                            className="w-full bg-transparent outline-none text-slate-600 text-sm font-medium leading-relaxed resize-none"
+                                            rows={4}
+                                            placeholder="내용을 입력하세요"
+                                        />
+                                    ) : (
+                                        <p className="text-slate-600 text-sm font-medium leading-relaxed whitespace-pre-wrap">
+                                            {selectedLog.note || "작성된 노트가 없습니다."}
+                                        </p>
+                                    )}
                                 </div>
+
+                                {/* Actions */}
                                 {user?.uid === selectedLog.uid && (
-                                    <button
-                                        onClick={() => {
-                                            if (confirm("정말 삭제하시겠습니까?")) {
-                                                deleteDoc(doc(db, "beers", selectedLog.id));
-                                                setSelectedLog(null);
-                                            }
-                                        }}
-                                        className="w-full py-3 text-red-500 font-bold text-sm bg-red-50 rounded-xl hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
-                                    >
-                                        <Trash2 size={16} /> 삭제하기
-                                    </button>
+                                    <>
+                                        {isDetailEditing ? (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleInlineUpdate}
+                                                    disabled={isUploading}
+                                                    className="flex-1 py-3 text-white font-bold text-sm bg-slate-900 rounded-xl hover:bg-black transition-colors shadow-lg"
+                                                >
+                                                    {isUploading ? "저장 중..." : "저장 완료"}
+                                                </button>
+                                                <button
+                                                    onClick={cancelInlineEdit}
+                                                    disabled={isUploading}
+                                                    className="flex-1 py-3 text-gray-500 font-bold text-sm bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                                                >
+                                                    취소
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={startInlineEdit}
+                                                    className="flex-1 py-3 text-blue-500 font-bold text-sm bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
+                                                >
+                                                    <Edit3 size={16} /> 수정
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (confirm("정말 삭제하시겠습니까?")) {
+                                                            deleteDoc(doc(db, "beers", selectedLog.id));
+                                                            setSelectedLog(null);
+                                                            setLogs(prev => prev.filter(l => l.id !== selectedLog.id));
+                                                        }
+                                                    }}
+                                                    className="flex-1 py-3 text-red-500 font-bold text-sm bg-red-50 rounded-xl hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                                                >
+                                                    <Trash2 size={16} /> 삭제
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </motion.div>

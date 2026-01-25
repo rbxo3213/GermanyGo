@@ -7,7 +7,7 @@ import { collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query, serve
 import { useAuth } from "../hooks/useAuth";
 import {
     X, MapPin, MessageCircle, Check, Loader2, Image as ImageIcon, Trash2, Plus,
-    PenLine, ListTodo, Heart, NotebookPen, LayoutGrid, CheckSquare, Gift, Filter, CalendarDays, Archive, Receipt, Recycle
+    PenLine, ListTodo, Heart, NotebookPen, LayoutGrid, CheckSquare, Gift, Archive, Receipt, Recycle
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
@@ -18,6 +18,7 @@ import ImageCropModal from "./ImageCropModal";
 const MemoComments = dynamic(() => import("./MemoComments"), { ssr: false });
 const ExpenseTracker = dynamic(() => import("./ExpenseTracker"), { ssr: false });
 
+// ... (Types & Constants remain same)
 type TabType = "board" | "todo" | "wish" | "expense";
 
 const TRIP_DATES = [
@@ -38,7 +39,7 @@ interface MemoItem {
     uid: string;
     nickname: string;
     flagColor?: string;
-    targetDate?: string | null; // For Todo (YYYY-MM-DD or null for Temp)
+    targetDate?: string | null;
     createdAt: Timestamp | null;
 }
 
@@ -88,12 +89,14 @@ export default function MemoPad() {
     const [isUploading, setIsUploading] = useState(false);
     const [selectedBoardItem, setSelectedBoardItem] = useState<MemoItem | null>(null);
 
-    // --- Helper: Sync Flags ---
+    // Edit State
+    const [isDetailEditing, setIsDetailEditing] = useState(false);
+
+    // ... (Sync Flags, Fetch Board/Todo/Wish Logic remains same)
     const syncFlags = async (items: MemoItem[]) => {
         const uids = Array.from(new Set(items.map(i => i.uid)));
         const newFlags = { ...userFlags };
         let needUpdate = false;
-
         for (const uid of uids) {
             if (!newFlags[uid]) {
                 const userSnap = await getDoc(doc(db, "users", uid));
@@ -107,7 +110,6 @@ export default function MemoPad() {
         return items.map(item => ({ ...item, flagColor: newFlags[item.uid] || "#000000" }));
     };
 
-    // --- 1. Fetch Board (Paginated) ---
     const fetchBoard = async (isLoadMore = false) => {
         if (!hasMoreBoard && isLoadMore) return;
         setIsLoadingBoard(true);
@@ -118,22 +120,17 @@ export default function MemoPad() {
                 orderBy("createdAt", "desc"),
                 limit(10)
             );
-
             if (isLoadMore && lastBoardDoc) {
                 q = query(q, startAfter(lastBoardDoc));
             }
-
             const snap = await getDocs(q);
             const newItems = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as MemoItem[];
-
             const merged = await syncFlags(newItems);
-
             if (isLoadMore) {
                 setBoardItems(prev => [...prev, ...merged]);
             } else {
                 setBoardItems(merged);
             }
-
             setLastBoardDoc(snap.docs[snap.docs.length - 1]);
             setHasMoreBoard(snap.docs.length === 10);
         } catch (e) {
@@ -144,78 +141,54 @@ export default function MemoPad() {
     };
 
     useEffect(() => {
+        setFilterMember("all");
         if (activeTab === "board") {
             setBoardItems([]);
             setLastBoardDoc(null);
             setHasMoreBoard(true);
             fetchBoard(false);
         }
-    }, [activeTab]); // Refetch on tab switch (simple approach)
+    }, [activeTab]);
 
-    // --- 2. Fetch Todo (Realtime, Date filtered) ---
     useEffect(() => {
         if (activeTab !== "todo") return;
-
         let q;
         if (todoDate === "temp") {
-            // Temp items (no targetDate)
-            q = query(
-                collection(db, "memos"),
-                where("category", "==", "todo"),
-                where("targetDate", "==", null), // or check for existence? null is easier if we save explicitly
-                orderBy("createdAt", "desc")
-            );
+            q = query(collection(db, "memos"), where("category", "==", "todo"), where("targetDate", "==", null), orderBy("createdAt", "desc"));
         } else {
-            // Date items
-            q = query(
-                collection(db, "memos"),
-                where("category", "==", "todo"),
-                where("targetDate", "==", todoDate),
-                orderBy("createdAt", "desc")
-            );
+            q = query(collection(db, "memos"), where("category", "==", "todo"), where("targetDate", "==", todoDate), orderBy("createdAt", "desc"));
         }
-
         const unsubscribe = onSnapshot(q, async (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as MemoItem[];
             const merged = await syncFlags(list);
             setTodoItems(merged);
         });
         return () => unsubscribe();
-    }, [activeTab, todoDate, userFlags]);
+    }, [activeTab, todoDate]);
 
-    // --- 3. Fetch Wish (Realtime, Simple Limit) ---
     useEffect(() => {
         if (activeTab !== "wish") return;
-        const q = query(
-            collection(db, "memos"),
-            where("category", "==", "wish"),
-            orderBy("createdAt", "desc"),
-            limit(50)
-        );
+        const q = query(collection(db, "memos"), where("category", "==", "wish"), orderBy("createdAt", "desc"), limit(50));
         const unsubscribe = onSnapshot(q, async (snap) => {
             const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as MemoItem[];
             const merged = await syncFlags(list);
             setWishItems(merged);
         });
         return () => unsubscribe();
-    }, [activeTab, userFlags]);
+    }, [activeTab]);
 
-
-    // Computed Members for Filter (Board Only)
     const members = useMemo(() => {
-        const names = new Set(boardItems.map(i => i.nickname));
+        const targetItems = activeTab === "board" ? boardItems : activeTab === "wish" ? wishItems : [];
+        const names = new Set(targetItems.map(i => i.nickname));
         return Array.from(names);
-    }, [boardItems]);
+    }, [boardItems, wishItems, activeTab]);
 
-    // Apply Filter to Board
     const filteredBoardItems = boardItems.filter(i => filterMember === "all" || i.nickname === filterMember);
-
-    // Handling Lists for Todo/Wish
-    const currentList = activeTab === "todo" ? todoItems : activeTab === "wish" ? wishItems : [];
+    const filteredWishItems = wishItems.filter(i => filterMember === "all" || i.nickname === filterMember);
+    const currentList = activeTab === "todo" ? todoItems : activeTab === "wish" ? filteredWishItems : [];
     const activeSimpleItems = currentList.filter(i => !i.completed);
     const completedSimpleItems = currentList.filter(i => i.completed);
 
-    // Handlers
     const handleSimpleAdd = async () => {
         if (!simpleInput.trim() || !user) return;
         try {
@@ -247,14 +220,12 @@ export default function MemoPad() {
         if (confirm("삭제하시겠습니까?")) {
             await deleteDoc(doc(db, "memos", id));
             if (selectedBoardItem?.id === id) setSelectedBoardItem(null);
-            // If board, remove directly from state to avoid re-fetch need (optional optimization)
             if (activeTab === "board") {
                 setBoardItems(prev => prev.filter(i => i.id !== id));
             }
         }
     };
 
-    // Board Add
     const handleBoardSubmit = async () => {
         if (!boardTitle.trim() || !user) return;
         setIsUploading(true);
@@ -272,7 +243,6 @@ export default function MemoPad() {
                 createdAt: serverTimestamp()
             });
             resetBoardForm();
-            // Refresh board
             setLastBoardDoc(null);
             setHasMoreBoard(true);
             fetchBoard(false);
@@ -308,6 +278,44 @@ export default function MemoPad() {
                 e.target.value = "";
             };
         }
+    };
+
+    // Edit Logic
+    const startInlineEditBoard = () => {
+        if (!selectedBoardItem) return;
+        setBoardTitle(selectedBoardItem.text);
+        setBoardContent(selectedBoardItem.content || "");
+        setBoardImage(selectedBoardItem.imageUrl || "");
+        if (selectedBoardItem.lat && selectedBoardItem.lng) {
+            setBoardLocation({ lat: selectedBoardItem.lat, lng: selectedBoardItem.lng });
+        } else {
+            setBoardLocation(null);
+        }
+        setIsDetailEditing(true);
+    };
+
+    const cancelInlineEditBoard = () => {
+        setIsDetailEditing(false);
+        setBoardTitle(""); setBoardContent(""); setBoardLocation(null); setBoardImage("");
+    };
+
+    const handleInlineBoardUpdate = async () => {
+        if (!selectedBoardItem || !user) return;
+        setIsUploading(true);
+        try {
+            const data: any = {
+                text: boardTitle,
+                content: boardContent,
+                lat: boardLocation?.lat ?? null,
+                lng: boardLocation?.lng ?? null,
+                imageUrl: boardImage,
+            };
+            await updateDoc(doc(db, "memos", selectedBoardItem.id), data);
+            const updatedItem = { ...selectedBoardItem, ...data };
+            setSelectedBoardItem(updatedItem);
+            setBoardItems(prev => prev.map(item => item.id === selectedBoardItem.id ? { ...item, ...data } : item));
+            setIsDetailEditing(false);
+        } catch (e) { console.error(e); } finally { setIsUploading(false); }
     };
 
     return (
@@ -353,10 +361,8 @@ export default function MemoPad() {
                     ))}
                 </div>
 
-                {/* --- Filters (Contextual) --- */}
-
-                {/* 1. Board: Member Filter */}
-                {activeTab === "board" && (
+                {/* Filters */}
+                {(activeTab === "board" || activeTab === "wish") && (
                     <div className="flex gap-2 overflow-x-auto scrollbar-hide">
                         <button onClick={() => setFilterMember("all")} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap border transition-all ${filterMember === "all" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-gray-500 border-gray-200"}`}>
                             전체 보기
@@ -368,64 +374,32 @@ export default function MemoPad() {
                         ))}
                     </div>
                 )}
-
-                {/* 2. Todo: Date Filter */}
                 {activeTab === "todo" && (
                     <div className="flex gap-2 overflow-x-auto scrollbar-hide snap-x pb-2">
-                        <button
-                            onClick={() => setTodoDate("temp")}
-                            className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${todoDate === "temp"
-                                ? "bg-slate-900 text-white border-slate-900 shadow-md"
-                                : "bg-white text-gray-400 border-gray-100"
-                                }`}
-                        >
+                        <button onClick={() => setTodoDate("temp")} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${todoDate === "temp" ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
                             <Archive size={18} className="mb-1" />
                             <span className="text-[10px] font-bold">임시</span>
                         </button>
-                        {TRIP_DATES.map((date, idx) => {
-                            const isSelected = date === todoDate;
-                            const day = date.split("-")[2];
-                            return (
-                                <button
-                                    key={date}
-                                    onClick={() => setTodoDate(date)}
-                                    className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${isSelected
-                                        ? "bg-slate-900 text-white border-slate-900 shadow-md"
-                                        : "bg-white text-gray-400 border-gray-100"
-                                        }`}
-                                >
-                                    <span className="text-[10px] font-bold mb-0.5">{WEEKDAYS[idx]}</span>
-                                    <span className="text-lg font-bold">{day}</span>
-                                </button>
-                            )
-                        })}
+                        {TRIP_DATES.map((date, idx) => (
+                            <button key={date} onClick={() => setTodoDate(date)} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${date === todoDate ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
+                                <span className="text-[10px] font-bold mb-0.5">{WEEKDAYS[idx]}</span>
+                                <span className="text-lg font-bold">{date.split("-")[2]}</span>
+                            </button>
+                        ))}
                     </div>
                 )}
             </div>
 
-            {/* --- Content Area --- */}
-
-            {/* VIEW: BOARD */}
+            {/* Content */}
             {activeTab === "board" && (
                 <div className="space-y-4">
-                    <button
-                        onClick={() => setIsBoardModalOpen(true)}
-                        className="w-full py-4 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 font-bold text-sm hover:border-slate-300 hover:text-slate-600 transition-all flex items-center justify-center gap-2 group bg-gray-50/50"
-                    >
-                        <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                            <Plus size={16} />
-                        </div>
+                    <button onClick={() => setIsBoardModalOpen(true)} className="w-full py-4 rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 font-bold text-sm hover:border-slate-300 hover:text-slate-600 transition-all flex items-center justify-center gap-2 group bg-gray-50/50">
+                        <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform"><Plus size={16} /></div>
                         새로운 글 쓰기
                     </button>
-
                     <div className="grid gap-3">
                         {filteredBoardItems.map(item => (
-                            <motion.div
-                                layoutId={item.id}
-                                key={item.id}
-                                onClick={() => setSelectedBoardItem(item)}
-                                className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer relative overflow-hidden"
-                            >
+                            <motion.div layoutId={item.id} key={item.id} onClick={() => setSelectedBoardItem(item)} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer relative overflow-hidden">
                                 <div className="absolute left-0 top-0 bottom-0 w-1.5" style={{ backgroundColor: item.flagColor || '#000' }} />
                                 <div className="flex gap-4 pl-2">
                                     {item.imageUrl && (
@@ -446,122 +420,58 @@ export default function MemoPad() {
                             </motion.div>
                         ))}
                     </div>
-
                     {hasMoreBoard && (
-                        <button
-                            onClick={() => fetchBoard(true)}
-                            disabled={isLoadingBoard}
-                            className="w-full py-4 text-xs font-bold text-gray-400 hover:text-slate-900 transition-colors flex items-center justify-center gap-2"
-                        >
-                            {isLoadingBoard ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-                            더 보기
+                        <button onClick={() => fetchBoard(true)} disabled={isLoadingBoard} className="w-full py-4 text-xs font-bold text-gray-400 hover:text-slate-900 transition-colors flex items-center justify-center gap-2">
+                            {isLoadingBoard ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} 더 보기
                         </button>
                     )}
                 </div>
             )}
 
-            {/* VIEW: TODO / WISH */}
             {(activeTab === "todo" || activeTab === "wish") && (
                 <div className="space-y-6">
-                    {/* Input Bar */}
                     <div className="bg-white border border-gray-200 rounded-2xl p-1.5 flex gap-2 shadow-sm focus-within:ring-2 focus-within:ring-slate-900/10 transition-all sticky top-20 z-10">
-                        <input
-                            type="text"
-                            value={simpleInput}
-                            onChange={(e) => setSimpleInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSimpleAdd()}
-                            placeholder={activeTab === "todo"
-                                ? (todoDate === "temp" ? "임시 할 일을 입력하세요" : `${todoDate.split('-')[2]}일 할 일을 입력하세요`)
-                                : "위시리스트에 추가할 것"}
-                            className="flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-gray-400"
-                        />
-                        <button
-                            onClick={handleSimpleAdd}
-                            disabled={!simpleInput.trim()}
-                            className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-black disabled:opacity-50 transition-colors"
-                        >
-                            <Plus size={16} strokeWidth={3} />
-                        </button>
+                        <input type="text" value={simpleInput} onChange={(e) => setSimpleInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSimpleAdd()} placeholder={activeTab === "todo" ? (todoDate === "temp" ? "임시 할 일을 입력하세요" : `${todoDate.split('-')[2]}일 할 일을 입력하세요`) : "위시리스트에 추가할 것"} className="flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-gray-400" />
+                        <button onClick={handleSimpleAdd} disabled={!simpleInput.trim()} className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-black disabled:opacity-50 transition-colors"><Plus size={16} strokeWidth={3} /></button>
                     </div>
-
-                    {/* Active Items */}
                     <ul className="space-y-3">
                         {activeSimpleItems.map(item => (
-                            <motion.li
-                                layout
-                                key={item.id}
-                                className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] relative overflow-hidden transition-colors"
-                            >
+                            <motion.li layout key={item.id} className="flex items-center justify-between p-4 bg-white rounded-2xl border border-gray-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] relative overflow-hidden transition-colors">
                                 <div className="absolute left-0 top-0 bottom-0 w-1.5" style={{ backgroundColor: item.flagColor || '#000' }} />
                                 <div className="flex items-center gap-3 flex-1 min-w-0 pl-2">
-                                    <button
-                                        onClick={() => handleToggle(item)}
-                                        className="w-5 h-5 rounded-md border-2 border-gray-300 hover:border-slate-400 bg-white flex items-center justify-center transition-all flex-shrink-0"
-                                    />
+                                    <button onClick={() => handleToggle(item)} className="w-5 h-5 rounded-md border-2 border-gray-300 hover:border-slate-400 bg-white flex items-center justify-center transition-all flex-shrink-0" />
                                     <div className="flex flex-col">
                                         <span className="text-sm font-bold text-slate-800">{item.text}</span>
                                         <span className="text-[10px] text-gray-400 mt-0.5 font-medium">{item.nickname}</span>
                                     </div>
                                 </div>
-                                {user?.uid === item.uid && (
-                                    <button onClick={() => handleDelete(item.id)} className="text-gray-300 hover:text-red-500 p-2 transition-colors">
-                                        <Trash2 size={16} />
-                                    </button>
-                                )}
+                                {user?.uid === item.uid && <button onClick={() => handleDelete(item.id)} className="text-gray-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={16} /></button>}
                             </motion.li>
                         ))}
                     </ul>
-
-                    {/* Completed Items */}
                     {completedSimpleItems.length > 0 && (
                         <div className="pt-4 border-t border-dashed border-gray-200">
                             <p className="text-xs font-bold text-gray-400 mb-3 px-1">완료됨 ({completedSimpleItems.length})</p>
                             <ul className="space-y-2">
                                 {completedSimpleItems.map(item => (
-                                    <motion.li
-                                        layout
-                                        key={item.id}
-                                        className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 relative overflow-hidden opacity-60 hover:opacity-100 transition-opacity"
-                                    >
+                                    <motion.li layout key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-100 relative overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
                                         <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: item.flagColor || '#000' }} />
                                         <div className="flex items-center gap-3 flex-1 min-w-0 pl-2">
-                                            <button
-                                                onClick={() => handleToggle(item)}
-                                                className="w-4 h-4 rounded-md bg-slate-900 border border-slate-900 text-white flex items-center justify-center transition-all flex-shrink-0"
-                                            >
-                                                <Check size={10} strokeWidth={4} />
-                                            </button>
-                                            <span className="text-sm font-medium text-gray-500 line-through decoration-gray-400">
-                                                {item.text}
-                                            </span>
+                                            <button onClick={() => handleToggle(item)} className="w-4 h-4 rounded-md bg-slate-900 border border-slate-900 text-white flex items-center justify-center transition-all flex-shrink-0"><Check size={10} strokeWidth={4} /></button>
+                                            <span className="text-sm font-medium text-gray-500 line-through decoration-gray-400">{item.text}</span>
                                         </div>
-                                        {user?.uid === item.uid && (
-                                            <button onClick={() => handleDelete(item.id)} className="text-gray-300 hover:text-red-500 p-1.5 transition-colors">
-                                                <X size={14} />
-                                            </button>
-                                        )}
+                                        {user?.uid === item.uid && <button onClick={() => handleDelete(item.id)} className="text-gray-300 hover:text-red-500 p-1.5 transition-colors"><X size={14} /></button>}
                                     </motion.li>
                                 ))}
                             </ul>
                         </div>
                     )}
-
-                    {currentList.length === 0 && (
-                        <div className="py-16 text-center text-gray-300 flex flex-col items-center gap-2 border-2 border-dashed border-gray-100 rounded-3xl">
-                            <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center">
-                                {activeTab === "todo" ? <ListTodo size={20} /> : <Heart size={20} />}
-                            </div>
-                            <span className="text-xs font-bold">아직 기록이 없어요</span>
-                        </div>
-                    )}
                 </div>
             )}
 
-            {/* VIEW: EXPENSE TRACKER */}
             {activeTab === "expense" && <ExpenseTracker />}
 
-            {/* --- Modals (Write, Detail, Cropper) --- */}
-            {/* Board Write Modal */}
+            {/* Modals */}
             <AnimatePresence>
                 {isBoardModalOpen && (
                     <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -591,7 +501,6 @@ export default function MemoPad() {
                 )}
             </AnimatePresence>
 
-            {/* Image Cropper */}
             <AnimatePresence>
                 {originalImg && (
                     <ImageCropModal
@@ -606,33 +515,93 @@ export default function MemoPad() {
                 )}
             </AnimatePresence>
 
-            {/* Board Detail Modal */}
             <AnimatePresence>
                 {selectedBoardItem && (
                     <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                         <motion.div layoutId={selectedBoardItem.id} className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl max-h-[80vh] flex flex-col">
+                            {/* Header */}
                             <div className="p-6 border-b border-gray-100 flex justify-between items-start sticky top-0 bg-white z-10">
-                                <div>
-                                    <h3 className="text-xl font-extrabold mb-1">{selectedBoardItem.text}</h3>
+                                <div className="flex-1 min-w-0 pr-4">
+                                    {isDetailEditing ? (
+                                        <input
+                                            type="text"
+                                            value={boardTitle}
+                                            onChange={e => setBoardTitle(e.target.value)}
+                                            className="w-full text-xl font-extrabold border-b border-gray-200 outline-none pb-1"
+                                            placeholder="제목"
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <h3 className="text-xl font-extrabold mb-1 leading-snug">{selectedBoardItem.text}</h3>
+                                    )}
                                     <span className="text-xs text-gray-400">by {selectedBoardItem.nickname}</span>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 items-center flex-shrink-0">
                                     {user?.uid === selectedBoardItem.uid && (
-                                        <button onClick={() => handleDelete(selectedBoardItem.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={20} /></button>
+                                        <>
+                                            {isDetailEditing ? (
+                                                <div className="flex gap-1">
+                                                    <button onClick={handleInlineBoardUpdate} className="text-xs font-bold bg-slate-900 text-white px-3 py-1.5 rounded-lg">저장</button>
+                                                    <button onClick={cancelInlineEditBoard} className="text-xs font-bold bg-gray-100 text-gray-500 px-3 py-1.5 rounded-lg">취소</button>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <button onClick={startInlineEditBoard} className="text-blue-400 hover:text-blue-600"><PenLine size={20} /></button>
+                                                    <button onClick={() => handleDelete(selectedBoardItem.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={20} /></button>
+                                                </>
+                                            )}
+                                        </>
                                     )}
-                                    <button onClick={() => setSelectedBoardItem(null)} className="bg-gray-100 p-1.5 rounded-full"><X size={18} /></button>
+                                    <button onClick={() => { setSelectedBoardItem(null); setIsDetailEditing(false); }} className="bg-gray-100 p-1.5 rounded-full"><X size={18} /></button>
                                 </div>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-6">
-                                {selectedBoardItem.imageUrl && (
-                                    <div className="rounded-xl overflow-hidden mb-6 bg-gray-50 border border-gray-100">
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img src={selectedBoardItem.imageUrl} alt="" className="w-full h-auto" />
+
+                            {/* Body */}
+                            <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+                                {/* Compact Edit Controls */}
+                                {isDetailEditing && (
+                                    <div className="flex gap-2 mb-4">
+                                        <button onClick={handleLocation} className={`flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold transition-colors ${boardLocation ? "bg-green-50 text-green-600 border border-green-100" : "bg-gray-50 text-gray-500 border border-gray-100"}`}>
+                                            {isLocating ? <Loader2 className="animate-spin" size={12} /> : <MapPin size={12} />} {boardLocation ? "위치 변경" : "위치 추가"}
+                                        </button>
+                                        <label className={`flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold cursor-pointer transition-colors ${boardImage ? "bg-blue-50 text-blue-600 border border-blue-100" : "bg-gray-50 text-gray-500 border border-gray-100"}`}>
+                                            <ImageIcon size={12} /> {boardImage ? "사진 변경" : "사진 추가"}
+                                            <input type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
+                                        </label>
                                     </div>
                                 )}
-                                <p className="text-gray-700 text-sm leading-relaxed mb-8 whitespace-pre-wrap">{selectedBoardItem.content}</p>
 
-                                {selectedBoardItem.lat && (
+                                {/* Image */}
+                                {(selectedBoardItem.imageUrl || boardImage) && (
+                                    <div className="rounded-xl overflow-hidden mb-6 bg-gray-50 border border-gray-100">
+                                        {isDetailEditing ? (
+                                            // Edit Mode: Show preview
+                                            <div className="relative w-full h-40">
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img src={boardImage || selectedBoardItem.imageUrl || ""} alt="" className="w-full h-full object-cover" />
+                                            </div>
+                                        ) : (
+                                            // View Mode
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={selectedBoardItem.imageUrl} alt="" className="w-full h-auto" />
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Content */}
+                                {isDetailEditing ? (
+                                    <textarea
+                                        value={boardContent}
+                                        onChange={e => setBoardContent(e.target.value)}
+                                        className="w-full h-40 resize-none outline-none text-sm leading-relaxed p-3 bg-gray-50 rounded-xl mb-6 border border-transparent focus:bg-white focus:border-slate-200 transition-all"
+                                        placeholder="내용을 입력하세요"
+                                    />
+                                ) : (
+                                    <p className="text-gray-700 text-sm leading-relaxed mb-8 whitespace-pre-wrap">{selectedBoardItem.content}</p>
+                                )}
+
+                                {/* Location Map (View Only) */}
+                                {!isDetailEditing && selectedBoardItem.lat && (
                                     <div className="h-40 rounded-xl overflow-hidden mb-8 border border-gray-100 shadow-inner">
                                         <MapContainer center={[selectedBoardItem.lat, selectedBoardItem.lng!]} zoom={14} zoomControl={false} className="w-full h-full">
                                             <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
@@ -641,6 +610,7 @@ export default function MemoPad() {
                                     </div>
                                 )}
 
+                                {/* Comments */}
                                 <div className="border-t border-gray-100 pt-6">
                                     <h4 className="font-bold text-sm mb-4 flex items-center gap-2"><MessageCircle size={16} /> 댓글</h4>
                                     <MemoComments memoId={selectedBoardItem.id} />

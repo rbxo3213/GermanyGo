@@ -31,7 +31,7 @@ const STATIC_PHRASES: Phrase[] = [
     { de: "Guten Abend", ko: "안녕하세요 (저녁)", pron: "구텐 아벤트", category: "greeting" },
     { de: "Danke schön", ko: "감사합니다", pron: "당케 쉔", category: "greeting" },
     { de: "Auf Wiedersehen", ko: "안녕히 계세요 (격식)", pron: "아우프 비더젠", category: "greeting" },
-    { de: "Können Sie ein Foto von uns machen?", ko: "사진 좀 찍어주실래요?", pron: "쾨넨 지 아인 포토 폰 운스 마헨?", category: "emergency" },
+    { de: "Können Sie ein Foto von uns machen?", ko: "사진 좀 찍어주실래요?", pron: "쾨넨 지 아인 포토 폰 운스 마헨?", category: "greeting" },
     { de: "Bitte sehr", ko: "천만에요 / 여기요", pron: "비테 제어", category: "greeting" },
     { de: "Entschuldigung", ko: "실례합니다", pron: "엔트슐디궁", category: "greeting" },
     { de: "Es tut mir leid", ko: "미안합니다", pron: "에스 투트 미어 라이트", category: "greeting" },
@@ -293,64 +293,71 @@ export default function GermanPhrasebook() {
                 </AnimatePresence>
             </div>
 
-            {/* List */}
+            {/* List Content */}
             <div className="space-y-2.5 px-1">
-                <AnimatePresence mode="popLayout">
-                    {displayPhrases.map((phrase, idx) => (
-                        <motion.div
-                            layout
-                            key={(phrase.id || phrase.de) + idx}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            transition={{ delay: idx * 0.02 }}
-                            onClick={() => speak(phrase.de)}
-                            className="bg-white p-4 rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] border border-gray-100 active:scale-[0.98] transition-all cursor-pointer group hover:border-slate-300 relative overflow-hidden"
-                        >
-                            <div className="flex justify-between items-center relative z-10">
-                                <div className="flex-1 min-w-0 pr-4">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="text-base font-black text-slate-800 leading-tight truncate">{phrase.de}</h3>
-                                        {(phrase as any).categoryLabel && (
-                                            <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold flex-shrink-0">
-                                                {(phrase as any).categoryLabel}
-                                            </span>
-                                        )}
-                                        {phrase.isCustom && (
-                                            <span className="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded font-bold flex-shrink-0">MY</span>
-                                        )}
-                                    </div>
-                                    <div className="flex flex-col gap-0.5">
-                                        <p className={`text-xs font-bold ${phrase.isCustom && !phrase.pron.includes('🔊') ? "text-blue-500" : "text-[#FFB700]"}`}>
-                                            {phrase.pron}
-                                        </p>
-                                        <p className="text-xs text-gray-500 font-medium">{phrase.ko}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    {phrase.isCustom && phrase.uid === user?.uid && (
-                                        <div className="flex gap-1 mr-1" onClick={(e) => e.stopPropagation()}>
-                                            <button
-                                                onClick={() => openEditModal(phrase)}
-                                                className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
-                                            >
-                                                <Pencil size={14} />
-                                            </button>
-                                            <button
-                                                onClick={() => phrase.id && handleDeletePhrase(phrase.id)}
-                                                className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
+                {/* 1. AnimatePresence는 리스트 전체의 교체를 감지합니다 */}
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        // 2. 중요: 카테고리나 검색어가 바뀔 때마다 이 'div' 자체가 새로 그려집니다.
+                        key={activeCat + searchTerm}
+
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                    >
+                        {/* 3. 내부는 일반 div로 렌더링 (map을 여기서 돌립니다) */}
+                        {displayPhrases.map((phrase, idx) => (
+                            <div
+                                key={(phrase.id || phrase.de) + idx}
+                                onClick={() => speak(phrase.de)}
+                                className="bg-white p-4 rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.02)] border border-gray-100 active:scale-[0.98] transition-all cursor-pointer group hover:border-slate-300 relative overflow-hidden mb-2.5"
+                            >
+                                <div className="flex justify-between items-center relative z-10">
+                                    <div className="flex-1 min-w-0 pr-4">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <h3 className="text-base font-black text-slate-800 leading-tight truncate">{phrase.de}</h3>
+                                            {(phrase as any).categoryLabel && (
+                                                <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold flex-shrink-0">
+                                                    {(phrase as any).categoryLabel}
+                                                </span>
+                                            )}
+                                            {phrase.isCustom && (
+                                                <span className="text-[9px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded font-bold flex-shrink-0">MY</span>
+                                            )}
                                         </div>
-                                    )}
-                                    <button className="p-2.5 bg-gray-50 rounded-full text-gray-400 group-hover:text-slate-900 group-hover:bg-[#FFCE00] transition-colors shadow-sm flex-shrink-0">
-                                        <Volume2 size={18} />
-                                    </button>
+                                        <div className="flex flex-col gap-0.5">
+                                            <p className={`text-xs font-bold ${phrase.isCustom && !phrase.pron.includes('🔊') ? "text-blue-500" : "text-[#FFB700]"}`}>
+                                                {phrase.pron}
+                                            </p>
+                                            <p className="text-xs text-gray-500 font-medium">{phrase.ko}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {phrase.isCustom && phrase.uid === user?.uid && (
+                                            <div className="flex gap-1 mr-1" onClick={(e) => e.stopPropagation()}>
+                                                <button
+                                                    onClick={() => openEditModal(phrase)}
+                                                    className="p-2 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"
+                                                >
+                                                    <Pencil size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={() => phrase.id && handleDeletePhrase(phrase.id)}
+                                                    className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        )}
+                                        <button className="p-2.5 bg-gray-50 rounded-full text-gray-400 group-hover:text-slate-900 group-hover:bg-[#FFCE00] transition-colors shadow-sm flex-shrink-0">
+                                            <Volume2 size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </motion.div>
-                    ))}
+                        ))}
+                    </motion.div>
                 </AnimatePresence>
 
                 {displayPhrases.length === 0 && (
