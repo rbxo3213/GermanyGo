@@ -88,8 +88,9 @@ export default function Home() {
         return <EmailVerification />;
     }
 
-    // 4. Nickname Setup Check
-    if (user && !userProfile) {
+    // 4. Onboarding (Nickname + Flag)
+    // If no profile, OR no flag (partial signup), show setup
+    if (user && (!userProfile || !userProfile.flag)) {
         return <NicknameSetup />;
     }
 

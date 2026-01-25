@@ -8,7 +8,7 @@ import {
     signOut,
     sendEmailVerification
 } from "firebase/auth";
-import { doc, runTransaction } from "firebase/firestore";
+import { doc, runTransaction, getDoc } from "firebase/firestore";
 
 export function useAuth() {
     const [user, setUser] = useState<User | null>(null);
@@ -18,14 +18,13 @@ export function useAuth() {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            setLoading(true); // Prevent UI flicker (LoginModal -> NicknameSetup -> Dashboard)
             setUser(currentUser);
 
             if (currentUser) {
                 // Fetch Profile from Firestore
                 try {
                     const userRef = doc(db, "users", currentUser.uid);
-                    // Dynamically import getDoc to avoid circular dependencies if any, or just use imported doc
-                    const { getDoc } = await import("firebase/firestore"); // lazy load to be safe or use top level if standard
                     const snap = await getDoc(userRef);
                     if (snap.exists()) {
                         setUserProfile(snap.data());
