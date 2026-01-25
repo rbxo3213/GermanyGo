@@ -188,9 +188,17 @@ export default function DailyLog() { // Renamed from BeerPassport
                         </div>
                         <div className="px-1">
                             <h3 className="font-bold text-slate-900 text-sm truncate leading-tight mb-1">{log.name}</h3>
-                            <div className="flex items-center gap-0.5">
-                                <Star size={10} className="text-[#FFCE00] fill-[#FFCE00]" />
-                                <span className="text-[10px] font-bold text-slate-500">{log.rating}</span>
+                            <div className="flex items-center gap-1.5 w-full overflow-hidden">
+                                <div className="flex items-center gap-0.5 flex-shrink-0">
+                                    <Star size={10} className="text-[#FFCE00] fill-[#FFCE00]" />
+                                    <span className="text-[10px] font-bold text-slate-500">{log.rating}</span>
+                                </div>
+                                {log.note && (
+                                    <>
+                                        <div className="w-0.5 h-2 bg-gray-200" />
+                                        <span className="text-[10px] text-gray-400 truncate flex-1">{log.note}</span>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </motion.div>

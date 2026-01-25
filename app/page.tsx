@@ -13,7 +13,7 @@ import { MessageSquare, Users, LogOut, Zap, Image as ImageIcon, Map as MapIcon, 
 const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
 const ItineraryTabs = dynamic(() => import("../components/ItineraryTabs"), { loading: () => <TabSkeleton /> });
 const TransportComparison = dynamic(() => import("../components/TransportComparison"), { loading: () => <TabSkeleton /> });
-const DailyLog = dynamic(() => import("../components/BeerPassport"), { loading: () => <TabSkeleton />, ssr: false }); // Renamed import for clarity
+const DailyLog = dynamic(() => import("../components/BeerPassport"), { loading: () => <TabSkeleton />, ssr: false });
 const CityGuide = dynamic(() => import("../components/CityGuide"), { loading: () => <TabSkeleton /> });
 const GermanPhrasebook = dynamic(() => import("../components/GermanPhrasebook"), { loading: () => <TabSkeleton />, ssr: false });
 const TravelLog = dynamic(() => import("../components/TravelLog"), { loading: () => <TabSkeleton />, ssr: false });
@@ -45,7 +45,6 @@ export default function Home() {
     useEffect(() => {
         const target = new Date("2026-02-06T00:00:00");
         const today = new Date();
-        // Reset hours to compare dates only
         today.setHours(0, 0, 0, 0);
         target.setHours(0, 0, 0, 0);
 
@@ -84,39 +83,9 @@ export default function Home() {
     // 3. Email Verified Check
     const isEmailProvider = user.providerData.some(p => p.providerId === 'password');
     if (isEmailProvider && !user.emailVerified) {
-        return (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white p-6">
-                <div className="w-full max-w-sm text-center">
-                    <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-8 shadow-xl">
-                        <span className="text-4xl">✉️</span>
-                    </div>
-                    <h2 className="text-3xl font-extrabold mb-4 text-slate-900 tracking-tight">메일함을 확인해주세요</h2>
-                    <p className="text-gray-500 mb-10 text-lg break-keep leading-relaxed">
-                        <span className="font-bold text-slate-900 underline decoration-yellow-400 decoration-4 underline-offset-4">{user.email}</span><br />
-                        인증 메일이 발송되었습니다.
-                    </p>
-                    <div className="space-y-3">
-                        <button onClick={() => window.location.reload()} className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl text-lg hover:bg-black transition-all shadow-lg shadow-gray-200">
-                            인증 완료 (새로고침)
-                        </button>
-                        <button type="button" onClick={async () => {
-                            if (!confirm("정말 가입을 취소하시겠습니까?")) return;
-                            try {
-                                const { doc, deleteDoc, getFirestore } = await import("firebase/firestore");
-                                const db = getFirestore();
-                                await deleteDoc(doc(db, "users", user.uid));
-                                await user.delete();
-                            } catch (e) {
-                                console.error("Cleanup failed", e);
-                                import("../firebase").then(m => m.auth.signOut());
-                            }
-                        }} className="w-full bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl text-lg hover:bg-gray-200 hover:text-gray-700 transition-all">
-                            가입 취소 / 로그아웃
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
+        // (EmailVerification 컴포넌트가 있다면 그것을 사용해도 됩니다)
+        const EmailVerification = dynamic(() => import("../components/EmailVerification"), { ssr: false });
+        return <EmailVerification />;
     }
 
     // 4. Nickname Setup Check
@@ -152,7 +121,7 @@ export default function Home() {
             {/* Dynamic Content Area */}
             <div className="max-w-md mx-auto px-4 mt-6">
 
-                {/* 1. GUIDE TAB (City Guide + Phrasebook) */}
+                {/* 1. GUIDE TAB */}
                 {activeTab === "guide" && (
                     <div className="animate-fadeIn">
                         <div className="flex justify-center mb-6">
@@ -175,18 +144,15 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* 2. MEMO TAB */}
+                {/* 2. MEMO TAB (수정됨: 중복 타이틀 제거) */}
                 {activeTab === "memo" && (
                     <div className="animate-fadeIn">
-                        <div className="mb-4">
-                            <h2 className="text-xl font-bold text-slate-800">Quick Memo</h2>
-                            <p className="text-sm text-gray-400">잊기 쉬운 아이디어를 기록하세요</p>
-                        </div>
+                        {/* 기존의 Quick Memo 텍스트 제거하고 바로 MemoPad 렌더링 */}
                         <MemoPad />
                     </div>
                 )}
 
-                {/* 3. LOG TAB (Simple Log + Gallery + Diary) */}
+                {/* 3. LOG TAB */}
                 {activeTab === "log" && (
                     <div className="animate-fadeIn">
                         <div className="flex justify-center mb-6">
@@ -195,13 +161,13 @@ export default function Home() {
                                     onClick={() => setLogMode("beer")}
                                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${logMode === "beer" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
                                 >
-                                    <Zap size={14} /> 간단 기록
+                                    <Zap size={14} /> 순간 기록
                                 </button>
                                 <button
                                     onClick={() => setLogMode("gallery")}
                                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${logMode === "gallery" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
                                 >
-                                    <ImageIcon size={14} /> 추억 갤러리
+                                    <ImageIcon size={14} /> 트래블 로그
                                 </button>
                                 <button
                                     onClick={() => setLogMode("diary")}
@@ -221,7 +187,7 @@ export default function Home() {
                     </div>
                 )}
 
-                {/* 4. TRANSPORT TAB (Info + Itinerary) */}
+                {/* 4. TRANSPORT TAB */}
                 {activeTab === "transport" && (
                     <div className="animate-fadeIn">
                         <div className="flex justify-center mb-6">

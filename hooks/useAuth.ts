@@ -64,8 +64,8 @@ export function useAuth() {
                     transaction.set(statsRef, { user_count: 1 });
                 } else {
                     const currentCount = statsDoc.data().user_count || 0;
-                    if (currentCount >= 3) {
-                        throw new Error("Group Full: Registration is limited to 3 members only.");
+                    if (currentCount >= 20) {
+                        throw new Error("Group Full: Registration is limited to 20 members only.");
                     }
                     transaction.update(statsRef, { user_count: currentCount + 1 });
                 }

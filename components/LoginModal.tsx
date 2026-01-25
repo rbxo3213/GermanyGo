@@ -27,6 +27,7 @@ export default function LoginModal() {
         if (code.includes("wrong-password")) return "비밀번호가 일치하지 않습니다.";
         if (code.includes("weak-password")) return "비밀번호는 6자 이상이어야 합니다.";
         if (code.includes("invalid-email")) return "이메일 형식이 올바르지 않습니다.";
+        if (code.includes("Group Full")) return "정원 초과: 가입 인원이 20명으로 제한되어 있습니다.";
         if (code.includes("network-request-failed")) return "네트워크 연결 상태를 확인해주세요.";
         return "오류가 발생했습니다.";
     };
