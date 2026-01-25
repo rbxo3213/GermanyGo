@@ -7,7 +7,7 @@ import { collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, query, serve
 import { useAuth } from "../hooks/useAuth";
 import {
     X, MapPin, MessageCircle, Check, Loader2, Image as ImageIcon, Trash2, Plus,
-    PenLine, ListTodo, Heart, NotebookPen, LayoutGrid, CheckSquare, Gift, Filter, CalendarDays, Archive
+    PenLine, ListTodo, Heart, NotebookPen, LayoutGrid, CheckSquare, Gift, Filter, CalendarDays, Archive, Receipt, Recycle
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
@@ -16,8 +16,9 @@ import L from "leaflet";
 import ImageCropModal from "./ImageCropModal";
 
 const MemoComments = dynamic(() => import("./MemoComments"), { ssr: false });
+const ExpenseTracker = dynamic(() => import("./ExpenseTracker"), { ssr: false });
 
-type TabType = "board" | "todo" | "wish";
+type TabType = "board" | "todo" | "wish" | "expense";
 
 const TRIP_DATES = [
     "2026-02-06", "2026-02-07", "2026-02-08", "2026-02-09", "2026-02-10",
@@ -322,22 +323,27 @@ export default function MemoPad() {
                         <h2 className="text-2xl font-black text-slate-900 leading-none">Memo Pad</h2>
                         <p className="text-xs text-gray-500 mt-1 font-medium">
                             <span className="text-slate-900 font-bold">
-                                {activeTab === 'board' ? boardItems.length : currentList.length}
-                            </span>개의 메모
+                                {activeTab === 'board' ? boardItems.length :
+                                    activeTab === 'todo' ? todoItems.length :
+                                        activeTab === 'wish' ? wishItems.length :
+                                            activeTab === 'expense' ? '€' : ''}
+                            </span>
+                            {activeTab === 'expense' ? ' 정산 계산기' : ' 개의 메모'}
                         </p>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-3 bg-gray-50 p-1.5 rounded-2xl gap-1 border border-gray-100">
+                <div className="grid grid-cols-4 bg-gray-50 p-1.5 rounded-2xl gap-1 border border-gray-100 overflow-x-auto">
                     {[
                         { id: "board", label: "게시판", icon: <LayoutGrid size={14} /> },
                         { id: "todo", label: "할 일", icon: <CheckSquare size={14} /> },
-                        { id: "wish", label: "위시", icon: <Gift size={14} /> }
+                        { id: "wish", label: "위시", icon: <Gift size={14} /> },
+                        { id: "expense", label: "정산", icon: <Receipt size={14} /> }
                     ].map((tab) => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id as TabType)}
-                            className={`py-3 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 ${activeTab === tab.id
+                            className={`py-3 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 min-w-[50px] ${activeTab === tab.id
                                 ? "bg-white text-slate-900 shadow-sm ring-1 ring-black/5"
                                 : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                                 }`}
@@ -550,6 +556,9 @@ export default function MemoPad() {
                     )}
                 </div>
             )}
+
+            {/* VIEW: EXPENSE TRACKER */}
+            {activeTab === "expense" && <ExpenseTracker />}
 
             {/* --- Modals (Write, Detail, Cropper) --- */}
             {/* Board Write Modal */}
