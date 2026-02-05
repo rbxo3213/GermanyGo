@@ -83,6 +83,7 @@ interface Props {
 }
 
 export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
+    const { user } = useAuth();
     const activeSegment = itinerarySegments.find((seg) => seg.id === activeTab);
 
     // Ticket Logic
@@ -91,16 +92,37 @@ export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
     const [uploadingTicket, setUploadingTicket] = useState(false);
 
     useEffect(() => {
-        const q = query(collection(db, "itinerary_tickets"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!user) return;
+        // Query only tickets belonging to the current user
+        const q = query(collection(db, "personal_tickets")); // We will filter client side or use composite ID for simple fetching
+        // actually for simplicity/speed let's just fetch all in collection and filter, 
+        // OR better: since we want to show ALL segments' tickets for THIS user, let's query where uid == user.uid
+        // But Firestroe requires index for that usually. 
+        // Let's use specific listener for *this user's* tickets if possible? 
+        // Easiest without index: Listen to collection, filter client side (assuming low volume) OR 
+        // Use composite keys and just fetch? No we need real-time updates.
+        // Let's try `where("uid", "==", user.uid)` - if index needed it will error in console, but for small app might be ok or we fix it.
+        // SAFE BET: Listen to all, filter by ID pattern or uid field client side. 
+        // Given existing code structure, let's stick to client filter for robustness without index generation steps.
+
+        const unsubscribe = onSnapshot(collection(db, "personal_tickets"), (snapshot) => {
             const ticketMap: { [key: string]: string } = {};
             snapshot.docs.forEach(doc => {
-                ticketMap[doc.id] = doc.data().imageUrl;
+                const data = doc.data();
+                // Check if this ticket belongs to the user
+                if (data.uid === user.uid) {
+                    // doc.id is assumed to be `${user.uid}_${segmentId}`
+                    // We need to extract segmentId to map it correctly
+                    // Or we can store segmentId in the document.
+                    if (data.segmentId) {
+                        ticketMap[data.segmentId] = data.imageUrl;
+                    }
+                }
             });
             setTickets(ticketMap);
         });
         return () => unsubscribe();
-    }, []);
+    }, [user]);
 
     const handleTicketUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.[0] || !activeSegment) return;
@@ -112,7 +134,12 @@ export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
             reader.readAsDataURL(file);
             reader.onload = async () => {
                 const base64 = reader.result as string;
-                await setDoc(doc(db, "itinerary_tickets", activeSegment.id), {
+                if (!user) return;
+
+                const docId = `${user.uid}_${activeSegment.id}`;
+                await setDoc(doc(db, "personal_tickets", docId), {
+                    uid: user.uid,
+                    segmentId: activeSegment.id,
                     imageUrl: base64,
                     updatedAt: new Date().toISOString()
                 });

@@ -61,3 +61,8 @@ body {
 .safe-area-pr {
   padding-right: env(safe-area-inset-right);
 }
+
+/* Drift Animation for Live Markers */
+.drift-marker {
+  transition: transform 10s linear !important;
+}

@@ -61,10 +61,11 @@ const createClusterCustomIcon = function (cluster: any) {
     });
 };
 
+// [수정됨] drift-marker 클래스 추가
 const createLiveUserIcon = (nickname: string, color: string) => {
     const initial = nickname ? nickname.charAt(0).toUpperCase() : "?";
     return L.divIcon({
-        className: 'custom-live-user-marker',
+        className: 'custom-live-user-marker drift-marker', // CSS 애니메이션 적용
         html: `<div style="
             width: 40px; 
             height: 40px; 
@@ -95,7 +96,7 @@ const createLiveUserIcon = (nickname: string, color: string) => {
         "></div>
         `,
         iconSize: [40, 40],
-        iconAnchor: [20, 42], // Centered bottom with slight offset for the 'pointer' dot
+        iconAnchor: [20, 42],
         popupAnchor: [0, -45]
     });
 };
@@ -129,7 +130,7 @@ function MapController({ coords, trigger }: { coords: [number, number] | null, t
         if (coords && trigger > 0) {
             map.flyTo(coords, 16, { duration: 1.2 });
         }
-    }, [trigger]); // Only run on trigger change
+    }, [trigger]);
     return null;
 }
 
@@ -151,7 +152,6 @@ export default function LBSDiscovery() {
     const [takenFlags, setTakenFlags] = useState<string[]>([]);
     const [pendingFlag, setPendingFlag] = useState<string | null>(null);
 
-    // ... types
     interface UserLocation {
         uid: string;
         lat: number;
@@ -161,16 +161,14 @@ export default function LBSDiscovery() {
         updatedAt: Timestamp;
     }
 
-
-    // Live Location State
     const [liveLocations, setLiveLocations] = useState<UserLocation[]>([]);
     const lastUploadTimeRef = useRef<number>(0);
     const lastSummaryPosRef = useRef<[number, number] | null>(null);
     const watchIdRef = useRef<number | null>(null);
 
-    // Helper: Calculate Distance (Haversine) - in meters
+    // Helper: Calculate Distance
     const getDistanceFromLatLonInM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-        const R = 6371; // Radius of the earth in km
+        const R = 6371;
         const dLat = (lat2 - lat1) * (Math.PI / 180);
         const dLon = (lon2 - lon1) * (Math.PI / 180);
         const a =
@@ -178,7 +176,7 @@ export default function LBSDiscovery() {
             Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
             Math.sin(dLon / 2) * Math.sin(dLon / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c * 1000; // Distance in meters
+        return R * c * 1000;
     };
 
     // 1. Initial Load & GPS
@@ -186,20 +184,20 @@ export default function LBSDiscovery() {
         if (!user) return;
 
         const startWatching = () => {
-            if (watchIdRef.current) return; // Already watching
+            if (watchIdRef.current) return;
 
             watchIdRef.current = navigator.geolocation.watchPosition(
                 async (pos) => {
                     const { latitude, longitude } = pos.coords;
-                    setPosition([latitude, longitude]);
+                    setPosition([latitude, longitude]); // 내 위치 즉시 갱신
                     setLoading(false);
 
-                    // --- Adaptive Throttling Logic ---
+                    // --- Adaptive Throttling (DB 쓰기 제한) ---
                     const now = Date.now();
                     const timeElapsed = now - lastUploadTimeRef.current;
                     const minInterval = 10000; // 10 seconds
 
-                    let distanceMoved = 100; // Default to trigger first write
+                    let distanceMoved = 100;
                     if (lastSummaryPosRef.current) {
                         distanceMoved = getDistanceFromLatLonInM(
                             lastSummaryPosRef.current[0], lastSummaryPosRef.current[1],
@@ -207,9 +205,7 @@ export default function LBSDiscovery() {
                         );
                     }
 
-                    // Condition: Time > 10s AND Distance > 15m
                     if (timeElapsed > minInterval && distanceMoved > 15) {
-                        // Write to Firestore 'user_locations'
                         if (userProfile && myFlag) {
                             try {
                                 const docRef = doc(db, "user_locations", user.uid);
@@ -251,10 +247,8 @@ export default function LBSDiscovery() {
             }
         };
 
-        // Initial Start
         startWatching();
 
-        // Background Suppression
         const handleVisibilityChange = () => {
             if (document.hidden) {
                 stopWatching();
@@ -266,24 +260,16 @@ export default function LBSDiscovery() {
         };
 
         document.addEventListener("visibilitychange", handleVisibilityChange);
-
-        // Cleanup
         return () => {
             stopWatching();
             document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
-
-        // Flag Check Logic (Merged into useEffect dependency chain if needed, but keeping separate is clearer for logic separation, 
-        // however for `myFlag` dependency in watchPosition, we need to be careful. 
-        // Current implementation re-runs effect on `myFlag` change which is acceptable.)
     }, [user, userProfile, myFlag]);
 
-    // Separate Effect for Check Flag (refactored from previous code to avoid complex deps)
+    // Flag Check logic
     useEffect(() => {
         if (!user || myFlag) return;
-
         const checkUserFlag = async () => {
-            // ... existing flag check logic
             const userRef = doc(db, "users", user.uid);
             const snap = await getDoc(userRef);
             if (snap.exists() && snap.data().flag) {
@@ -314,26 +300,27 @@ export default function LBSDiscovery() {
         return () => unsubscribe();
     }, []);
 
-    // 3. Load Live Locations (New)
+    // 3. Load Live Locations (Friend Only)
     useEffect(() => {
-        // We fetch all and filter client side for 'last 30 mins' to keep it simple or use complex query
-        // Using client-side filter for simplicity with small user base
         const q = query(collection(db, "user_locations"));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const now = Date.now();
             const activeUsers = snapshot.docs
                 .map(doc => doc.data() as UserLocation)
                 .filter(loc => {
+                    // [중요] 나 자신은 제외 (로컬 상태로 표시하기 위함)
+                    if (user && loc.uid === user.uid) return false;
+
                     if (!loc.updatedAt) return false;
                     const diff = now - loc.updatedAt.toMillis();
-                    return diff < 30 * 60 * 1000; // 30 minutes
+                    return diff < 30 * 60 * 1000; // 30 mins
                 });
             setLiveLocations(activeUsers);
         });
         return () => unsubscribe();
-    }, []);
+    }, [user]); // user가 로드되면 재실행
 
-    // 3. Confirm Flag
+    // ... (Flag Confirm, Save Footprint logic omitted for brevity, same as before)
     const handleConfirmFlag = async () => {
         if (!pendingFlag || !user) return;
         if (takenFlags.includes(pendingFlag)) {
@@ -348,7 +335,6 @@ export default function LBSDiscovery() {
         } catch (e) { alert("저장 실패"); }
     };
 
-    // 4. Save Footprint
     const handleSaveFootprint = async () => {
         if (!user || !message.trim() || !myFlag || !position) return;
         try {
@@ -403,11 +389,11 @@ export default function LBSDiscovery() {
                 <MarkerClusterGroup
                     chunkedLoading
                     iconCreateFunction={createClusterCustomIcon}
-                    maxClusterRadius={40} // 🔴 민감도 조정: 40px 이내만 묶음 (덜 뭉침)
+                    maxClusterRadius={40}
                     spiderfyOnMaxZoom={true}
                     showCoverageOnHover={false}
                 >
-                    {/* Footprints of messages */}
+                    {/* 1. Footprints (메시지) */}
                     {displayedFootprints.map((fp) => (
                         <Marker key={fp.id} position={[fp.lat, fp.lng]} icon={createFlagIcon(fp.flag || "#000")}>
                             <Popup className="custom-popup" closeButton={false} maxWidth={200}>
@@ -447,13 +433,31 @@ export default function LBSDiscovery() {
                         </Marker>
                     ))}
 
-                    {/* Live Users */}
+                    {/* 2. My Live Location (로컬 GPS 기반 - 즉시 표시) */}
+                    {position && myFlag && (
+                        <Marker
+                            position={position}
+                            icon={createLiveUserIcon(userProfile?.nickname || "나", myFlag)}
+                            zIndexOffset={1000} // 내 위치가 제일 위에 보이도록
+                        >
+                            <Popup closeButton={false} className="custom-popup" maxWidth={150}>
+                                <div className="text-center p-2">
+                                    <div className="font-black text-sm text-slate-900 mb-1">나 (My Location)</div>
+                                    <div className="text-[10px] text-gray-400 font-bold bg-gray-50 rounded-full px-2 py-0.5 inline-block">
+                                        실시간 위치
+                                    </div>
+                                </div>
+                            </Popup>
+                        </Marker>
+                    )}
+
+                    {/* 3. Friends Live Users (서버 기반 - 중복 방지됨) */}
                     {liveLocations.map(loc => (
                         <Marker
                             key={`live-${loc.uid}`}
                             position={[loc.lat, loc.lng]}
                             icon={createLiveUserIcon(loc.nickname, loc.flag)}
-                            zIndexOffset={100} // Ensure live users are on top
+                            zIndexOffset={100}
                         >
                             <Popup closeButton={false} className="custom-popup" maxWidth={150}>
                                 <div className="text-center p-2">
@@ -466,124 +470,65 @@ export default function LBSDiscovery() {
                         </Marker>
                     ))}
 
-
                 </MarkerClusterGroup>
             </MapContainer>
 
-            {/* --- Controls --- */}
-
+            {/* --- Controls & Modals (그대로 유지) --- */}
             <div className="absolute top-5 left-5 z-[400]">
-                <button
-                    onClick={() => setShowOnlyMine(!showOnlyMine)}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-xs font-bold transition-all border
-                        ${showOnlyMine
-                            ? "bg-slate-900 text-[#FFCE00] border-slate-900"
-                            : "bg-white text-slate-600 border-gray-100 hover:bg-gray-50"}`}
-                >
+                <button onClick={() => setShowOnlyMine(!showOnlyMine)} className={`flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg text-xs font-bold transition-all border ${showOnlyMine ? "bg-slate-900 text-[#FFCE00] border-slate-900" : "bg-white text-slate-600 border-gray-100 hover:bg-gray-50"}`}>
                     <Filter size={14} />
                     {showOnlyMine ? "내 깃발만" : "모두 보기"}
                 </button>
             </div>
-
             <div className="absolute top-5 right-5 z-[400]">
-                <button
-                    onClick={() => setFlyTrigger(prev => prev + 1)}
-                    className="p-3 bg-white text-slate-700 rounded-full shadow-lg hover:bg-gray-50 active:scale-95 transition-all border border-gray-100"
-                >
+                <button onClick={() => setFlyTrigger(prev => prev + 1)} className="p-3 bg-white text-slate-700 rounded-full shadow-lg hover:bg-gray-50 active:scale-95 transition-all border border-gray-100">
                     <Crosshair size={20} />
                 </button>
             </div>
-
             <div className="absolute bottom-8 right-6 z-[400]">
-                <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => {
-                        setMessage("");
-                        setEditingId(null);
-                        setIsMsgModalOpen(true);
-                    }}
-                    className="bg-slate-900 hover:bg-black text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-colors"
-                >
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => { setMessage(""); setEditingId(null); setIsMsgModalOpen(true); }} className="bg-slate-900 hover:bg-black text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-colors">
                     <Plus size={28} strokeWidth={3} />
                 </motion.button>
             </div>
 
-            {/* --- Modals --- */}
-
-            {/* Flag Selection */}
             <AnimatePresence>
                 {isFlagSelectionOpen && (
                     <div className="absolute inset-0 z-[600] bg-white/95 backdrop-blur-sm flex items-center justify-center p-6">
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            className="max-w-xs w-full text-center"
-                        >
+                        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="max-w-xs w-full text-center">
                             <h3 className="text-xl font-extrabold text-slate-900 mb-2">나만의 깃발 고르기 🚩</h3>
                             <p className="text-xs text-gray-500 mb-6">지도에 표시될 나만의 색상을 정해주세요.</p>
-
                             <div className="grid grid-cols-5 gap-3 mb-8 p-1">
                                 {FLAG_COLORS.map((f) => {
                                     const isTaken = takenFlags.includes(f.color);
                                     return (
-                                        <button
-                                            key={f.id} disabled={isTaken} onClick={() => setPendingFlag(f.color)}
-                                            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative
-                                                ${isTaken ? "opacity-20 cursor-not-allowed" :
-                                                    pendingFlag === f.color ? "bg-slate-100 ring-2 ring-slate-900 scale-110 shadow-md" : "hover:scale-110 hover:bg-gray-50"}`}
-                                        >
+                                        <button key={f.id} disabled={isTaken} onClick={() => setPendingFlag(f.color)} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all relative ${isTaken ? "opacity-20 cursor-not-allowed" : pendingFlag === f.color ? "bg-slate-100 ring-2 ring-slate-900 scale-110 shadow-md" : "hover:scale-110 hover:bg-gray-50"}`}>
                                             <div dangerouslySetInnerHTML={{ __html: getFlagSvg(f.color) }} className="scale-[0.65]" />
                                         </button>
                                     );
                                 })}
                             </div>
-                            <button onClick={handleConfirmFlag} disabled={!pendingFlag} className="w-full py-3.5 text-white font-bold bg-slate-900 rounded-2xl shadow-lg disabled:opacity-50 hover:bg-black transition-colors">
-                                선택 완료
-                            </button>
+                            <button onClick={handleConfirmFlag} disabled={!pendingFlag} className="w-full py-3.5 text-white font-bold bg-slate-900 rounded-2xl shadow-lg disabled:opacity-50 hover:bg-black transition-colors">선택 완료</button>
                         </motion.div>
                     </div>
                 )}
             </AnimatePresence>
 
-            {/* Message Modal (Refined UI) */}
             <AnimatePresence>
                 {isMsgModalOpen && (
                     <div className="absolute inset-0 z-[500] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6">
-                        <motion.div
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            exit={{ y: 20, opacity: 0 }}
-                            className="bg-white rounded-[2rem] p-6 w-full max-w-sm shadow-2xl relative"
-                        >
-                            <button
-                                onClick={() => setIsMsgModalOpen(false)}
-                                className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"
-                            >
+                        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="bg-white rounded-[2rem] p-6 w-full max-w-sm shadow-2xl relative">
+                            <button onClick={() => setIsMsgModalOpen(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
                                 <X size={18} className="text-gray-500" />
                             </button>
-
                             <div className="text-center mb-6 mt-2">
                                 <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white mx-auto mb-3 shadow-lg">
                                     <MapPin size={24} />
                                 </div>
-                                <h3 className="text-xl font-black text-slate-900">
-                                    {editingId ? "기록 수정하기" : "여기에 발자취 남기기"}
-                                </h3>
+                                <h3 className="text-xl font-black text-slate-900">{editingId ? "기록 수정하기" : "여기에 발자취 남기기"}</h3>
                                 <p className="text-xs text-gray-400 font-bold mt-1">이 장소에서의 기억을 깃발로 꽂아두세요</p>
                             </div>
-
-                            <textarea
-                                value={message} onChange={(e) => setMessage(e.target.value)}
-                                className="w-full bg-gray-50 border-none rounded-2xl p-4 mb-4 focus:ring-2 focus:ring-slate-900 outline-none text-base font-medium resize-none placeholder:text-gray-400 min-h-[100px]"
-                                placeholder="예: 여기 커피 진짜 맛있다! ☕️"
-                            />
-
-                            <button
-                                onClick={handleSaveFootprint}
-                                disabled={!message.trim()}
-                                className="w-full py-4 text-white font-bold bg-slate-900 rounded-2xl shadow-xl hover:bg-black transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
+                            <textarea value={message} onChange={(e) => setMessage(e.target.value)} className="w-full bg-gray-50 border-none rounded-2xl p-4 mb-4 focus:ring-2 focus:ring-slate-900 outline-none text-base font-medium resize-none placeholder:text-gray-400 min-h-[100px]" placeholder="예: 여기 커피 진짜 맛있다! ☕️" />
+                            <button onClick={handleSaveFootprint} disabled={!message.trim()} className="w-full py-4 text-white font-bold bg-slate-900 rounded-2xl shadow-xl hover:bg-black transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
                                 {editingId ? "수정 완료" : "깃발 꽂기"}
                             </button>
                         </motion.div>
