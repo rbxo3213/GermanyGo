@@ -1,4 +1,5 @@
 import { useEditor, EditorContent } from '@tiptap/react'
+import { useEffect } from 'react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import TaskList from '@tiptap/extension-task-list'
@@ -19,12 +20,16 @@ interface Props {
 
 export default function RichTextEditor({ content, onChange, editable = true, placeholder = "내용을 입력하세요..." }: Props) {
     const editor = useEditor({
+        immediatelyRender: false,
         extensions: [
             StarterKit,
             Underline,
             TaskList,
             TaskItem.configure({
                 nested: true,
+                HTMLAttributes: {
+                    class: 'flex gap-2 items-start my-1',
+                },
             }),
             Placeholder.configure({
                 placeholder,
@@ -41,6 +46,20 @@ export default function RichTextEditor({ content, onChange, editable = true, pla
             },
         },
     });
+
+    // Content Sync
+    useEffect(() => {
+        if (editor && content !== editor.getHTML()) {
+            editor.commands.setContent(content);
+        }
+    }, [content, editor]);
+
+    // Editable Sync
+    useEffect(() => {
+        if (editor) {
+            editor.setEditable(editable);
+        }
+    }, [editable, editor]);
 
     if (!editor) {
         return null;
@@ -114,22 +133,28 @@ export default function RichTextEditor({ content, onChange, editable = true, pla
                 .ProseMirror ul[data-type="taskList"] {
                     list-style: none;
                     padding: 0;
+                    margin: 0;
                 }
                 .ProseMirror ul[data-type="taskList"] li {
                     display: flex;
-                    align-items: flex-start; 
+                    align-items: flex-start;
                     margin-bottom: 0.5rem;
                 }
                 .ProseMirror ul[data-type="taskList"] li > label {
-                    flex: 0 0 auto;
                     margin-right: 0.5rem;
                     user-select: none;
-                    margin-top: 0.15rem;
+                    cursor: pointer;
+                }
+                .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+                    cursor: pointer;
+                    width: 1.1em;
+                    height: 1.1em;
+                    margin-top: 0.15em;
                 }
                 .ProseMirror ul[data-type="taskList"] li > div {
-                    flex: 1 1 auto;
+                    flex: 1;
                 }
-                /* Typography Overrides for Tailwind Prose (optional if using @tailwindcss/typography) */
+                /* Typography Overrides */
                 .prose ul {
                      list-style-type: disc;
                      padding-left: 1.5em;
