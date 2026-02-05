@@ -9,6 +9,7 @@ import {
     X, MapPin, MessageCircle, Check, Loader2, Image as ImageIcon, Trash2, Plus,
     PenLine, ListTodo, Heart, NotebookPen, LayoutGrid, CheckSquare, Gift, Archive, Receipt, Recycle
 } from "lucide-react";
+import { useNotification } from "../contexts/NotificationContext";
 import dynamic from "next/dynamic";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -17,6 +18,7 @@ import ImageCropModal from "./ImageCropModal";
 
 const MemoComments = dynamic(() => import("./MemoComments"), { ssr: false });
 const ExpenseTracker = dynamic(() => import("./ExpenseTracker"), { ssr: false });
+const RichTextEditor = dynamic(() => import("./RichTextEditor"), { ssr: false });
 
 // ... (Types & Constants remain same)
 type TabType = "board" | "todo" | "wish" | "expense";
@@ -51,9 +53,24 @@ const icon = L.icon({
     iconAnchor: [12, 41],
 });
 
-export default function MemoPad() {
+interface MemoPadProps {
+    externalTab?: TabType | null;
+    externalDate?: string | null;
+    navTrigger?: number;
+}
+
+export default function MemoPad({ externalTab, externalDate, navTrigger }: MemoPadProps) {
     const { user, userProfile } = useAuth();
+    const { unreadMap, sendNotification, markByTypeAsRead } = useNotification();
     const [activeTab, setActiveTab] = useState<TabType>("board");
+
+    // Sync external props to state
+    useEffect(() => {
+        if (externalTab) setActiveTab(externalTab);
+    }, [externalTab, navTrigger]);
+
+    // Auto-read notifications when checking the tab
+
 
     // --- State Separation ---
     const [boardItems, setBoardItems] = useState<MemoItem[]>([]);
@@ -70,6 +87,19 @@ export default function MemoPad() {
         const today = new Date().toISOString().split("T")[0];
         return TRIP_DATES.includes(today) ? today : TRIP_DATES[0];
     });
+
+    useEffect(() => {
+        if (externalDate) setTodoDate(externalDate);
+    }, [externalDate]);
+
+    // Auto-read notifications when checking the tab
+    useEffect(() => {
+        if (activeTab === 'board' || activeTab === 'wish' || activeTab === 'expense') {
+            markByTypeAsRead(activeTab);
+        } else if (activeTab === 'todo') {
+            markByTypeAsRead('todo', todoDate);
+        }
+    }, [activeTab, todoDate]);
 
     // Cache user flags
     const [userFlags, setUserFlags] = useState<{ [uid: string]: string }>({});
@@ -202,7 +232,28 @@ export default function MemoPad() {
             };
             if (activeTab === "todo") {
                 data.targetDate = todoDate === "temp" ? null : todoDate;
+
+                // Notification
+                let msg = "";
+                if (todoDate === 'temp') {
+                    msg = `${userProfile?.nickname || "익명"}님이 임시 할 일을 올렸습니다.`;
+                    sendNotification('todo', msg, 'temp');
+                } else {
+                    const d = new Date(todoDate);
+                    // Format: 2월 6일 금요일
+                    // Note: getMonth is 0-indexed
+                    const month = d.getMonth() + 1;
+                    const day = d.getDate();
+                    // Find weekday index from TRIP_DATES if possible, or just use Date object
+                    const dayName = WEEKDAYS[TRIP_DATES.indexOf(todoDate)] || "일";
+                    msg = `${userProfile?.nickname || "익명"}님이 ${month}월 ${day}일 ${dayName}요일 할 일을 올렸습니다.`;
+                    sendNotification('todo', msg, todoDate);
+                }
+            } else {
+                // Wish
+                sendNotification('wish', `${userProfile?.nickname || "익명"}님이 위시리스트를 올렸습니다.`);
             }
+
             await addDoc(collection(db, "memos"), data);
             setSimpleInput("");
         } catch (e) { console.error(e); }
@@ -242,6 +293,10 @@ export default function MemoPad() {
                 nickname: userProfile?.nickname || "익명",
                 createdAt: serverTimestamp()
             });
+
+            // Notification
+            sendNotification('board', `${userProfile?.nickname || "익명"}님이 게시판에 글을 작성했습니다.`);
+
             resetBoardForm();
             setLastBoardDoc(null);
             setHasMoreBoard(true);
@@ -347,18 +402,28 @@ export default function MemoPad() {
                         { id: "todo", label: "할 일", icon: <CheckSquare size={14} /> },
                         { id: "wish", label: "위시", icon: <Gift size={14} /> },
                         { id: "expense", label: "정산", icon: <Receipt size={14} /> }
-                    ].map((tab) => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id as TabType)}
-                            className={`py-3 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 min-w-[50px] ${activeTab === tab.id
-                                ? "bg-white text-slate-900 shadow-sm ring-1 ring-black/5"
-                                : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-                                }`}
-                        >
-                            {tab.icon} {tab.label}
-                        </button>
-                    ))}
+                    ].map((tab) => {
+                        const showDot = (tab.id === 'board' && unreadMap.board) ||
+                            (tab.id === 'todo' && unreadMap.todo) ||
+                            (tab.id === 'wish' && unreadMap.wish) ||
+                            (tab.id === 'expense' && unreadMap.expense);
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id as TabType)}
+                                className={`py-3 rounded-xl text-[10px] sm:text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 min-w-[50px] relative ${activeTab === tab.id
+                                    ? "bg-white text-slate-900 shadow-sm ring-1 ring-black/5"
+                                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                                    }`}
+                            >
+                                <div className="relative">
+                                    {tab.icon}
+                                    {showDot && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />}
+                                </div>
+                                {tab.label}
+                            </button>
+                        )
+                    })}
                 </div>
 
                 {/* Filters */}
@@ -376,14 +441,16 @@ export default function MemoPad() {
                 )}
                 {activeTab === "todo" && (
                     <div className="flex gap-2 overflow-x-auto scrollbar-hide snap-x pb-2">
-                        <button onClick={() => setTodoDate("temp")} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${todoDate === "temp" ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
+                        <button onClick={() => setTodoDate("temp")} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border relative ${todoDate === "temp" ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
                             <Archive size={18} className="mb-1" />
                             <span className="text-[10px] font-bold">임시</span>
+                            {unreadMap.todoDates['temp'] && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white" />}
                         </button>
                         {TRIP_DATES.map((date, idx) => (
-                            <button key={date} onClick={() => setTodoDate(date)} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border ${date === todoDate ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
+                            <button key={date} onClick={() => setTodoDate(date)} className={`flex flex-col items-center justify-center min-w-[50px] h-[60px] rounded-xl snap-start transition-all border relative ${date === todoDate ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-gray-400 border-gray-100"}`}>
                                 <span className="text-[10px] font-bold mb-0.5">{WEEKDAYS[idx]}</span>
                                 <span className="text-lg font-bold">{date.split("-")[2]}</span>
+                                {unreadMap.todoDates[date] && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white" />}
                             </button>
                         ))}
                     </div>
@@ -410,7 +477,9 @@ export default function MemoPad() {
                                     )}
                                     <div className="flex-1 min-w-0 py-0.5">
                                         <h3 className="font-bold text-slate-900 text-base line-clamp-1 mb-1">{item.text}</h3>
-                                        <p className="text-gray-500 text-xs line-clamp-2 mb-2 leading-relaxed">{item.content}</p>
+                                        <p className="text-gray-500 text-xs line-clamp-2 mb-2 leading-relaxed">
+                                            {item.content?.replace(/<[^>]*>?/gm, '') || "내용 없음"}
+                                        </p>
                                         <div className="flex justify-between items-center text-[10px] text-gray-400 font-medium">
                                             <span>{item.nickname}</span>
                                             {item.lat && <MapPin size={12} className="text-gray-300" />}
@@ -481,8 +550,10 @@ export default function MemoPad() {
                                 <button onClick={resetBoardForm}><X size={20} /></button>
                             </div>
                             <div className="space-y-4">
-                                <input type="text" placeholder="제목" value={boardTitle} onChange={e => setBoardTitle(e.target.value)} className="w-full text-lg font-bold outline-none placeholder:text-gray-300" />
-                                <textarea placeholder="내용을 입력하세요" value={boardContent} onChange={e => setBoardContent(e.target.value)} className="w-full h-32 resize-none text-sm outline-none placeholder:text-gray-300" />
+                                <input type="text" placeholder="제목" value={boardTitle} onChange={e => setBoardTitle(e.target.value)} className="w-full text-lg font-bold outline-none placeholder:text-gray-300 mb-2" />
+                                <div className="min-h-[200px] border border-gray-100 rounded-xl overflow-hidden">
+                                    <RichTextEditor content={boardContent} onChange={setBoardContent} placeholder="내용을 자유롭게 작성해보세요..." />
+                                </div>
                                 <div className="flex gap-2">
                                     <button onClick={handleLocation} className={`flex-1 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-colors ${boardLocation ? "bg-green-50 text-green-600" : "bg-gray-50 text-gray-500"}`}>
                                         {isLocating ? <Loader2 className="animate-spin" size={14} /> : <MapPin size={14} />} 위치
@@ -590,14 +661,18 @@ export default function MemoPad() {
 
                                 {/* Content */}
                                 {isDetailEditing ? (
-                                    <textarea
-                                        value={boardContent}
-                                        onChange={e => setBoardContent(e.target.value)}
-                                        className="w-full h-40 resize-none outline-none text-sm leading-relaxed p-3 bg-gray-50 rounded-xl mb-6 border border-transparent focus:bg-white focus:border-slate-200 transition-all"
-                                        placeholder="내용을 입력하세요"
-                                    />
+                                    <div className="mb-6">
+                                        <RichTextEditor
+                                            content={boardContent}
+                                            onChange={setBoardContent}
+                                            placeholder="내용을 입력하세요"
+                                        />
+                                    </div>
                                 ) : (
-                                    <p className="text-gray-700 text-sm leading-relaxed mb-8 whitespace-pre-wrap">{selectedBoardItem.content}</p>
+                                    <div className="mb-8 p-1 prose prose-sm max-w-none">
+                                        {/* Use RichTextEditor in readonly mode for consistent rendering */}
+                                        <RichTextEditor content={selectedBoardItem.content || ""} onChange={() => { }} editable={false} />
+                                    </div>
                                 )}
 
                                 {/* Location Map (View Only) */}
@@ -613,7 +688,7 @@ export default function MemoPad() {
                                 {/* Comments */}
                                 <div className="border-t border-gray-100 pt-6">
                                     <h4 className="font-bold text-sm mb-4 flex items-center gap-2"><MessageCircle size={16} /> 댓글</h4>
-                                    <MemoComments memoId={selectedBoardItem.id} />
+                                    <MemoComments memoId={selectedBoardItem.id} memoTitle={selectedBoardItem.text} />
                                 </div>
                             </div>
                         </motion.div>

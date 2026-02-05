@@ -5,6 +5,7 @@ import { db } from "../firebase";
 import { collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteDoc, doc, Timestamp } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
 import { Send, Trash2 } from "lucide-react";
+import { useNotification } from "../contexts/NotificationContext";
 
 interface Comment {
     id: string;
@@ -16,10 +17,12 @@ interface Comment {
 
 interface MemoCommentsProps {
     memoId: string;
+    memoTitle: string;
 }
 
-export default function MemoComments({ memoId }: MemoCommentsProps) {
+export default function MemoComments({ memoId, memoTitle }: MemoCommentsProps) {
     const { user, userProfile } = useAuth();
+    const { sendNotification } = useNotification();
     const [comments, setComments] = useState<Comment[]>([]);
     const [text, setText] = useState("");
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -52,6 +55,12 @@ export default function MemoComments({ memoId }: MemoCommentsProps) {
                 nickname: userProfile?.nickname || user.displayName || "여행자",
                 createdAt: serverTimestamp()
             });
+
+            // Send Notification
+            // Truncate comment if too long
+            const preview = text.length > 20 ? text.substring(0, 20) + "..." : text;
+            await sendNotification('board', `${userProfile?.nickname || "익명"}님이 "${memoTitle}"에 댓글: "${preview}"`);
+
             setText("");
         } catch (e) {
             console.error(e);

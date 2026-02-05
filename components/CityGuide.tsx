@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import { Cloud, Sun, CloudRain, Snowflake, Utensils, Camera, ShoppingBag, MapPin, Navigation, ArrowRight, AlertCircle } from "lucide-react";
+import { Cloud, Sun, CloudRain, Snowflake, Utensils, Camera, ShoppingBag, MapPin, Navigation, ArrowRight, AlertCircle, Download } from "lucide-react";
+import { useSettings } from "../contexts/SettingsContext";
 
 // --- Types ---
 type PlaceInfo = {
@@ -78,6 +79,7 @@ interface Props {
 }
 
 export default function CityGuide({ activeLeg }: Props) {
+    const { dataSaver } = useSettings();
     const cityName = LEG_MAPPING[activeLeg] || "Frankfurt";
     const themeColor = cityThemes[activeLeg] || "from-blue-500 to-cyan-400";
 
@@ -135,17 +137,69 @@ export default function CityGuide({ activeLeg }: Props) {
     }, []);
 
     // 2. Fetch Data
+    const fetchPlaces = async (force = false) => {
+        if (dataSaver && !force) {
+            console.log("Data Saver ON: Skipping Places API");
+            setData(prev => ({
+                ...prev,
+                food: { ...prev.food, loading: false },
+                spot: { ...prev.spot, loading: false },
+                market: { ...prev.market, loading: false },
+            }));
+            return;
+        }
+
+        setData(prev => ({
+            ...prev,
+            food: { ...prev.food, loading: true },
+            spot: { ...prev.spot, loading: true },
+            market: { ...prev.market, loading: true },
+        }));
+
+        try {
+            if (useGPS && !location) return;
+
+            const baseQuery = useGPS ? "" : `${cityName} `;
+            const locationParams = useGPS && location
+                ? `&lat=${location.lat.toFixed(2)}&lng=${location.lng.toFixed(2)}&radius=2000`
+                : "";
+
+            const queries = [
+                { key: 'food', q: `${baseQuery}best restaurant` },
+                { key: 'spot', q: `${baseQuery}tourist attraction` },
+                { key: 'market', q: `${baseQuery}shopping mall or market` }
+            ];
+
+            const results = await Promise.all(
+                queries.map(async ({ key, q }) => {
+                    const res = await fetch(`/api/places?query=${encodeURIComponent(q)}${locationParams}`);
+                    if (!res.ok) throw new Error("Server Error");
+                    const json = await res.json();
+                    return { key, items: json.results?.slice(0, 3) || [] };
+                })
+            );
+
+            setData(prev => {
+                const next = { ...prev };
+                results.forEach(({ key, items }) => { (next as any)[key] = { items, loading: false }; });
+                return next;
+            });
+
+        } catch (error) {
+            console.error("Fetch Error:", error);
+            setData(prev => ({
+                ...prev,
+                food: { ...prev.food, loading: false },
+                spot: { ...prev.spot, loading: false },
+                market: { ...prev.market, loading: false },
+            }));
+        }
+    };
+
     useEffect(() => {
         setData(prev => ({ ...prev, themeColor }));
 
-        const fetchAllData = async () => {
-            setData(prev => ({
-                ...prev,
-                food: { ...prev.food, loading: true },
-                spot: { ...prev.spot, loading: true },
-                market: { ...prev.market, loading: true },
-            }));
-
+        const fetchWeather = async () => {
             let lat = CITY_COORDS[cityName]?.lat;
             let lng = CITY_COORDS[cityName]?.lng;
 
@@ -154,7 +208,6 @@ export default function CityGuide({ activeLeg }: Props) {
                 lng = location.lng;
             }
 
-            // A. Weather
             try {
                 if (lat && lng) {
                     const weatherRes = await fetch(
@@ -174,58 +227,12 @@ export default function CityGuide({ activeLeg }: Props) {
                     }
                 }
             } catch (e) { console.error("Weather Error", e); }
-
-            // B. Places
-            try {
-                if (useGPS && !location) return;
-
-                const baseQuery = useGPS ? "" : `${cityName} `;
-                // 요청 시에도 2자리로 잘라서 보냄
-                const locationParams = useGPS && location
-                    ? `&lat=${location.lat.toFixed(2)}&lng=${location.lng.toFixed(2)}&radius=2000`
-                    : "";
-
-                const queries = [
-                    { key: 'food', q: `${baseQuery}best restaurant` },
-                    { key: 'spot', q: `${baseQuery}tourist attraction` },
-                    { key: 'market', q: `${baseQuery}shopping mall or market` }
-                ];
-
-                const results = await Promise.all(
-                    queries.map(async ({ key, q }) => {
-                        const res = await fetch(`/api/places?query=${encodeURIComponent(q)}${locationParams}`);
-                        if (!res.ok) throw new Error("Server Error");
-                        const json = await res.json();
-
-                        if (json._debug) {
-                            const { isCacheHit, duration, query } = json._debug;
-                            if (isCacheHit) console.log(`%c📦 [CACHE] ${duration}ms - ${query}`, 'color: green');
-                            else console.log(`%c💸 [API] ${duration}ms - ${query}`, 'color: red');
-                        }
-
-                        return { key, items: json.results?.slice(0, 3) || [] };
-                    })
-                );
-
-                setData(prev => {
-                    const next = { ...prev };
-                    results.forEach(({ key, items }) => { (next as any)[key] = { items, loading: false }; });
-                    return next;
-                });
-
-            } catch (error) {
-                console.error("Fetch Error:", error);
-                setData(prev => ({
-                    ...prev,
-                    food: { ...prev.food, loading: false },
-                    spot: { ...prev.spot, loading: false },
-                    market: { ...prev.market, loading: false },
-                }));
-            }
         };
 
-        fetchAllData();
-    }, [activeLeg, cityName, useGPS, location, themeColor]);
+        fetchWeather();
+        fetchPlaces();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeLeg, cityName, useGPS, location, themeColor, dataSaver]); // Added dataSaver dependency to refetch if turned off
 
     return (
         <div className="w-full max-w-md mx-auto space-y-8">
@@ -276,9 +283,9 @@ export default function CityGuide({ activeLeg }: Props) {
             </motion.div>
 
             <div className="space-y-8">
-                <PlaceCarousel title="현지 맛집" icon={<Utensils size={18} className="text-orange-500" />} data={data.food} />
-                <PlaceCarousel title="주요 명소" icon={<Camera size={18} className="text-purple-500" />} data={data.spot} />
-                <PlaceCarousel title="쇼핑 & 마켓" icon={<ShoppingBag size={18} className="text-yellow-500" />} data={data.market} />
+                <PlaceCarousel title="현지 맛집" icon={<Utensils size={18} className="text-orange-500" />} data={data.food} onLoad={() => fetchPlaces(true)} dataSaver={dataSaver} />
+                <PlaceCarousel title="주요 명소" icon={<Camera size={18} className="text-purple-500" />} data={data.spot} onLoad={() => fetchPlaces(true)} dataSaver={dataSaver} />
+                <PlaceCarousel title="쇼핑 & 마켓" icon={<ShoppingBag size={18} className="text-yellow-500" />} data={data.market} onLoad={() => fetchPlaces(true)} dataSaver={dataSaver} />
             </div>
 
             <div className="flex justify-center pt-2 pb-6">
@@ -290,7 +297,7 @@ export default function CityGuide({ activeLeg }: Props) {
     );
 }
 
-function PlaceCarousel({ title, icon, data }: { title: string, icon: React.ReactNode, data: CategoryData }) {
+function PlaceCarousel({ title, icon, data, onLoad, dataSaver }: { title: string, icon: React.ReactNode, data: CategoryData, onLoad?: () => void, dataSaver?: boolean }) {
     return (
         <div className="space-y-4">
             <div className="flex items-center gap-2.5 px-1">
@@ -337,8 +344,19 @@ function PlaceCarousel({ title, icon, data }: { title: string, icon: React.React
                     ))
                 ) : (
                     <div className="min-w-full h-36 flex flex-col items-center justify-center text-gray-400 text-sm bg-gray-50/50 rounded-[1.5rem] border border-dashed border-gray-200">
-                        <Camera size={24} className="mb-2 opacity-50" />
-                        <span>추천 장소를 찾을 수 없어요</span>
+                        {dataSaver ? (
+                            <div className="text-center">
+                                <span className="block text-xs mb-2">데이터 절약 모드 사용 중</span>
+                                <button onClick={onLoad} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1 mx-auto hover:bg-black transition-colors">
+                                    <Download size={12} /> 데이터 불러오기
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <Camera size={24} className="mb-2 opacity-50" />
+                                <span>추천 장소를 찾을 수 없어요</span>
+                            </>
+                        )}
                     </div>
                 )}
             </div>

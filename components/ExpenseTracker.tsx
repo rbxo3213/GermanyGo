@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, doc, updateDoc, getDocs } from "firebase/firestore";
 import { useAuth } from "../hooks/useAuth";
+import { useNotification } from "../contexts/NotificationContext";
 import { Plus, Trash2, Wallet, Receipt, ArrowRight, Euro, User, RefreshCcw, CheckSquare, Square, ShoppingCart, Bus, Utensils, MoreHorizontal, CheckCircle2, Pencil, ChevronDown, ChevronUp, AlertCircle, Landmark } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -41,6 +42,7 @@ const CATEGORIES = [
 
 export default function ExpenseTracker() {
     const { user } = useAuth();
+    const { sendNotification } = useNotification();
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [members, setMembers] = useState<{ uid: string; nickname: string }[]>([]);
 
@@ -180,6 +182,8 @@ export default function ExpenseTracker() {
                 await updateDoc(doc(db, "expenses", editId), data);
             } else {
                 await addDoc(collection(db, "expenses"), data);
+                // Notification
+                sendNotification('expense', `${payerName}님이 정산 내역을 올렸습니다.`);
             }
 
             closeModal();

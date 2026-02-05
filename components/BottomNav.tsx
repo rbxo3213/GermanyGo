@@ -1,6 +1,7 @@
 "use client";
 
 import { Map, Train, Calendar, BookOpen, NotebookPen, MessageCircle } from "lucide-react";
+import { useNotification } from "@/contexts/NotificationContext";
 
 type Tab = "guide" | "memo" | "log" | "transport" | "map";
 
@@ -10,10 +11,11 @@ interface BottomNavProps {
 }
 
 export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
+    const { unreadMap } = useNotification();
     const navItems = [
         { id: "guide", label: "가이드", icon: BookOpen },
         { id: "memo", label: "메모", icon: NotebookPen },
-        { id: "log", label: "기록", icon: Calendar }, // Renamed from itinerary
+        { id: "log", label: "기록", icon: Calendar },
         { id: "transport", label: "이동", icon: Train },
         { id: "map", label: "지도", icon: Map },
     ] as const;
@@ -24,6 +26,8 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
                 {navItems.map((item) => {
                     const isActive = activeTab === item.id;
                     const Icon = item.icon;
+                    // Logic for red dot: if item.id is 'memo' and unreadMap.memo is true
+                    const showDot = item.id === 'memo' && unreadMap.memo;
 
                     return (
                         <button
@@ -37,11 +41,16 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
                                 <span className="absolute -top-3 w-8 h-1 bg-black rounded-full" />
                             )}
 
-                            <Icon
-                                size={24}
-                                className={`transition-colors duration-300 ${isActive ? "text-black" : "text-gray-300 group-hover:text-gray-500"}`}
-                                strokeWidth={isActive ? 2.5 : 2}
-                            />
+                            <div className="relative">
+                                <Icon
+                                    size={24}
+                                    className={`transition-colors duration-300 ${isActive ? "text-black" : "text-gray-300 group-hover:text-gray-500"}`}
+                                    strokeWidth={isActive ? 2.5 : 2}
+                                />
+                                {showDot && (
+                                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#DD0000] rounded-full border-2 border-white pointer-events-none" />
+                                )}
+                            </div>
                             <span className={`text-[10px] font-bold transition-colors duration-300 ${isActive ? "text-black" : "text-gray-400"}`}>
                                 {item.label}
                             </span>

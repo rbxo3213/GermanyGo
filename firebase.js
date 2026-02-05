@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore"; // Updated imports
 import { getStorage } from "firebase/storage";
@@ -13,7 +13,9 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
-const app = initializeApp(firebaseConfig);
+
+const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
+
 export const auth = getAuth(app);
 
 // Initialize Firestore with modern persistence settings

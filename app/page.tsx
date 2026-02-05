@@ -7,7 +7,10 @@ import TabSkeleton from "@/components/TabSkeleton";
 import LoginModal from "@/components/LoginModal";
 import { useAuth } from "@/hooks/useAuth";
 import { AnimatePresence } from "framer-motion";
-import { MessageSquare, Users, LogOut, Zap, Image as ImageIcon, Map as MapIcon, Languages, Calendar, Bus, Book } from "lucide-react";
+import { MessageSquare, Settings, LogOut, Zap, Image as ImageIcon, Map as MapIcon, Languages, Calendar, Bus, Book, Bell } from "lucide-react";
+import { NotificationProvider, useNotification } from "@/contexts/NotificationContext";
+import NotificationPopup from "@/components/NotificationPopup";
+import { SettingsProvider } from "@/contexts/SettingsContext";
 
 // Async Components (Lazy Load)
 const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
@@ -21,40 +24,13 @@ const PrivateDiary = dynamic(() => import("../components/PrivateDiary"), { loadi
 const LBSDiscovery = dynamic(() => import("../components/LBSDiscovery"), { loading: () => <TabSkeleton />, ssr: false });
 const AIOptimizer = dynamic(() => import("../components/AIOptimizer"), { ssr: false });
 const GroupChat = dynamic(() => import("../components/GroupChat"), { ssr: false });
-const MemberInfo = dynamic(() => import("../components/MemberInfo"), { ssr: false });
+const SettingsDashboard = dynamic(() => import("../components/SettingsDashboard"), { ssr: false });
 const NicknameSetup = dynamic(() => import("../components/NicknameSetup"), { ssr: false });
 
 type Tab = "guide" | "memo" | "log" | "transport" | "map";
 
 export default function Home() {
     const { user, userProfile, loading } = useAuth();
-    const [activeTab, setActiveTab] = useState<Tab>("guide");
-    const [activeLeg, setActiveLeg] = useState("leg1");
-
-    // Sub-tabs
-    const [guideMode, setGuideMode] = useState<"city" | "phrase">("city");
-    const [transportMode, setTransportMode] = useState<"info" | "itinerary">("itinerary");
-    const [logMode, setLogMode] = useState<"beer" | "gallery" | "diary">("beer");
-
-    // Modals
-    const [showChat, setShowChat] = useState(false);
-    const [showMembers, setShowMembers] = useState(false);
-
-    const [dDay, setDDay] = useState("D-DAY");
-
-    useEffect(() => {
-        const target = new Date("2026-02-06T00:00:00");
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        target.setHours(0, 0, 0, 0);
-
-        const diffTime = target.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (diffDays > 0) setDDay(`D-${diffDays}`);
-        else if (diffDays === 0) setDDay("D-Day");
-        else setDDay(`D+${Math.abs(diffDays)}`);
-    }, []);
 
     // 1. Loading State
     if (loading) {
@@ -94,28 +70,108 @@ export default function Home() {
         return <NicknameSetup />;
     }
 
-    // 5. Dashboard
+    return (
+        <SettingsProvider>
+            <NotificationProvider>
+                <MainApp />
+            </NotificationProvider>
+        </SettingsProvider>
+    );
+}
+
+function MainApp() {
+    const { unreadMap, markAsRead } = useNotification(); // Add markAsRead
+    const [activeTab, setActiveTab] = useState<Tab>("guide");
+    const [activeLeg, setActiveLeg] = useState("leg1");
+
+    // Sub-tabs
+    const [guideMode, setGuideMode] = useState<"city" | "phrase">("city");
+    const [transportMode, setTransportMode] = useState<"info" | "itinerary">("itinerary");
+    const [logMode, setLogMode] = useState<"beer" | "gallery" | "diary">("beer");
+
+    // Memo Deep Linking
+    const [memoTab, setMemoTab] = useState<any>(null); // "board" | "todo" | "wish" | "expense"
+    const [memoDate, setMemoDate] = useState<string | null>(null);
+    const [navKey, setNavKey] = useState(0);
+
+    // Modals
+    const [showChat, setShowChat] = useState(false);
+    const [showMembers, setShowMembers] = useState(false);
+    const [showNotifications, setShowNotifications] = useState(false);
+
+    const [dDay, setDDay] = useState("D-DAY");
+
+    useEffect(() => {
+        const target = new Date("2026-02-06T00:00:00");
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        target.setHours(0, 0, 0, 0);
+
+        const diffTime = target.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays > 0) setDDay(`D-${diffDays}`);
+        else if (diffDays === 0) setDDay("D-Day");
+        else setDDay(`D+${Math.abs(diffDays)}`);
+    }, []);
+
+    const handleNotificationClick = (item: any) => {
+        // 1. Mark as read
+        markAsRead([item.id]);
+
+        // 2. Close popup
+        setShowNotifications(false);
+
+        // 3. Trigger Navigation
+        setNavKey(prev => prev + 1);
+
+        // 4. Navigate
+        if (item.type === 'board') {
+            setActiveTab("memo");
+            setMemoTab("board");
+        } else if (item.type === 'wish') {
+            setActiveTab("memo");
+            setMemoTab("wish");
+        } else if (item.type === 'expense') {
+            setActiveTab("memo");
+            setMemoTab("expense");
+        } else if (item.type === 'todo') {
+            setActiveTab("memo");
+            setMemoTab("todo");
+            if (item.targetDate) {
+                setMemoDate(item.targetDate);
+            } else {
+                setMemoDate("temp");
+            }
+        }
+    };
+
     return (
         <main className="min-h-screen bg-slate-50 text-black font-sans pb-32">
             {/* Header */}
-            <header className="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-4 border-b border-gray-100 flex justify-between items-center shadow-sm">
-                <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-1">
-                    🇩🇪 Germa-Niche
+            <header className="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-4 py-3 border-b border-gray-100 flex justify-between items-center shadow-sm">
+                <h1 className="text-lg font-black tracking-tighter flex items-center gap-1">
+                    Germa-Niche
                 </h1>
-                <div className="flex items-center gap-3">
-                    <div className="text-[10px] font-bold bg-black text-[#FFCE00] px-3 py-1 rounded-full border border-gray-800 mr-2">
+                <div className="flex items-center gap-1.5">
+                    <div className="text-[10px] font-bold bg-black text-[#FFCE00] px-2.5 py-1 rounded-full border border-gray-800 mr-1">
                         {dDay}
                     </div>
-                    <button onClick={() => setShowMembers(true)} className="text-gray-800 hover:text-black transition-all">
-                        <Users size={22} strokeWidth={2.5} />
+                    <button onClick={() => setShowMembers(true)} className="text-gray-800 hover:text-black transition-all p-1">
+                        <Settings size={20} strokeWidth={2.5} />
                     </button>
-                    <button onClick={() => setShowChat(true)} className="text-gray-800 hover:text-black transition-all relative">
-                        <MessageSquare size={22} strokeWidth={2.5} />
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#DD0000] rounded-full border-2 border-white"></span>
+
+                    <button onClick={() => setShowChat(true)} className="relative p-1.5 rounded-full hover:bg-gray-100 transition-colors">
+                        <MessageSquare size={20} className="text-slate-900" />
+                        {/* <InAppNotification /> */} {/* Assuming InAppNotification is a component that might be added later */}
                     </button>
-                    <button onClick={() => import("../firebase").then(m => m.auth.signOut())} className="text-gray-300 hover:text-red-500 transition-colors ml-1">
-                        <LogOut size={20} />
+
+                    <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-1.5 rounded-full hover:bg-gray-100 transition-colors">
+                        <Bell size={20} className="text-slate-900" />
+                        {unreadMap.total > 0 && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-[#FF3B30] rounded-full border border-white"></span>}
                     </button>
+
+
                 </div>
             </header>
 
@@ -149,7 +205,7 @@ export default function Home() {
                 {activeTab === "memo" && (
                     <div className="animate-fadeIn">
                         {/* 기존의 Quick Memo 텍스트 제거하고 바로 MemoPad 렌더링 */}
-                        <MemoPad />
+                        <MemoPad externalTab={memoTab} externalDate={memoDate} navTrigger={navKey} />
                     </div>
                 )}
 
@@ -227,10 +283,16 @@ export default function Home() {
 
             <AnimatePresence>
                 {showChat && <GroupChat onClose={() => setShowChat(false)} />}
-                {showMembers && <MemberInfo onClose={() => setShowMembers(false)} />}
+                {showMembers && <SettingsDashboard onClose={() => setShowMembers(false)} />}
+                {showNotifications && (
+                    <NotificationPopup
+                        onClose={() => setShowNotifications(false)}
+                        onItemClick={handleNotificationClick}
+                    />
+                )}
             </AnimatePresence>
 
             <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
-        </main>
+        </main >
     );
 }
