@@ -15,7 +15,7 @@ import { SettingsProvider } from "@/contexts/SettingsContext";
 // Async Components (Lazy Load)
 const MemoPad = dynamic(() => import("../components/MemoPad"), { loading: () => <TabSkeleton /> });
 const ItineraryTabs = dynamic(() => import("../components/ItineraryTabs"), { loading: () => <TabSkeleton /> });
-const TransportComparison = dynamic(() => import("../components/TransportComparison"), { loading: () => <TabSkeleton /> });
+const DetailedItinerary = dynamic(() => import("../components/DetailedItinerary"), { loading: () => <TabSkeleton /> });
 const DailyLog = dynamic(() => import("../components/DailyLog"), { loading: () => <TabSkeleton />, ssr: false });
 const CityGuide = dynamic(() => import("../components/CityGuide"), { loading: () => <TabSkeleton /> });
 const GermanPhrasebook = dynamic(() => import("../components/GermanPhrasebook"), { loading: () => <TabSkeleton />, ssr: false });
@@ -259,14 +259,14 @@ function MainApp() {
                                     onClick={() => setTransportMode("info")}
                                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${transportMode === "info" ? "bg-slate-900 text-white shadow-md" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"}`}
                                 >
-                                    <Bus size={14} /> 교통 정보
+                                    <Book size={14} /> 상세 일정
                                 </button>
                             </div>
                         </div>
                         {transportMode === "itinerary" ? (
                             <ItineraryTabs activeTab={activeLeg} onTabChange={setActiveLeg} />
                         ) : (
-                            <TransportComparison />
+                            <DetailedItinerary />
                         )}
                     </div>
                 )}

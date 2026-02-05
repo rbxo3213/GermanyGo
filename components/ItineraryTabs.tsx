@@ -1,64 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Ticket, Upload, X, Loader2, Image as ImageIcon, QrCode, Clock, Train } from "lucide-react";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc, onSnapshot, collection, query } from "firebase/firestore";
+import { useAuth } from "../hooks/useAuth";
 
-// Update Data to match Full Schedule (Feb 6 - Feb 16)
+// New 12-Day Schedule Data
 const itinerarySegments = [
     {
         id: "leg1",
-        period: "2/6 - 2/8",
+        period: "2/6 (금) - 2/8 (일)",
         route: "Frankfurt → Nuremberg",
-        transport: "ICE (고속열차)",
-        duration: "약 2시간",
-        description: "독일 여행의 시작입니다. 3인 여행이므로 슈퍼세이버(Super Sparpreis) 티켓을 미리 예약하면 저렴합니다. 가장 빠르고 편안한 구간입니다.",
-        tip: "Travel Tip: 뷔르츠부르크(Würzburg)를 지날 때 창밖으로 보이는 포도밭 풍경이 아름답습니다. 오른쪽 좌석을 추천합니다.",
+        transport: "ICE 927",
+        duration: "18:17 - 20:45",
+        description: "독일 도착 후 첫 이동입니다. 프랑크푸르트 공항 장거리 역(Fernbf)에서 탑승하여 뉘른베르크 중앙역으로 이동합니다.",
+        tip: "예약 번호: 319008601019 | 공항역 플랫폼 확인 필수",
         link: "https://bahn.com",
         recommended: true,
     },
     {
         id: "leg2",
-        period: "2/8 - 2/10",
+        period: "2/8 (일) - 2/10 (화)",
         route: "Nuremberg → Prague",
-        transport: "FlixBus (버스)",
-        duration: "약 3시간 50분",
-        description: "이 구간은 기차보다 버스가 핵심입니다. 기차는 환승이 잦고 느립니다. DB IC Bus 혹은 FlixBus 직행을 타세요. 가격도 훨씬 저렴합니다.",
-        tip: "Travel Tip: 뉘른베르크 버스 터미널(ZOB)은 중앙역 바로 옆에 있습니다. 프라하 도착 시 'Florenc' 역이 아닌 'Main Station'에 내리는 게 시내 접근성이 좋습니다.",
+        transport: "FlixBus N109",
+        duration: "09:10 - 12:45",
+        description: "뉘른베르크 ZOB에서 출발하여 프라하 Na Knížecí로 이동합니다. 버스 여행입니다.",
+        tip: "예약 번호: 332 403 1092 | 도착역: Na Knížecí",
         link: "https://flixbus.com",
         recommended: true,
     },
     {
         id: "leg3",
-        period: "2/10 - 2/12",
+        period: "2/10 (화) - 2/12 (목)",
         route: "Prague → Berlin",
-        transport: "EC (유로시티)",
-        duration: "약 4시간 15분",
-        description: "프라하에서 베를린으로 가는 기차는 엘베 강변을 따라 달리는 유럽 최고의 기차 뷰 중 하나입니다. 식당칸에서 체코 맥주를 마시며 이동해보세요.",
-        tip: "Travel Tip: 반드시 'Elbe River' 뷰(진행 방향 오른쪽)를 예약하세요. 풍경이 정말 예술입니다.",
-        link: "https://cd.cz",
+        transport: "RegioJet Bus",
+        duration: "08:30 - 13:00",
+        description: "프라하 플로렌스(Florenc) 터미널 출발, 베를린 ZOB 도착.",
+        tip: "티켓 번호: 6087503310 | 베를린 ZOB 하차",
+        link: "https://regiojet.com",
         recommended: true,
     },
     {
         id: "leg4",
-        period: "2/12 - 2/14",
+        period: "2/12 (목) - 2/14 (토)",
         route: "Berlin → Hamburg",
-        transport: "ICE (고속열차)",
-        duration: "약 1시간 45분",
-        description: "독일의 수도에서 제2의 도시로 이동합니다. 배차 간격이 매우 촘촘(30분 단위)하여 일정 짜기가 수월합니다.",
-        tip: "Travel Tip: 함부르크에 도착하면 'Miniatur Wunderland' 예약 시간에 맞춰 이동하세요. 중앙역에서 버스로 15분 거리입니다.",
-        link: "https://bahn.com",
+        transport: "FlixBus 050",
+        duration: "08:15 - 11:30",
+        description: "베를린 ZOB에서 출발하여 함부르크 ZOB로 이동합니다.",
+        tip: "예약 번호: 332 415 8061 | 약 3시간 15분 소요",
+        link: "https://flixbus.com",
         recommended: false,
     },
     {
         id: "leg5",
-        period: "2/14 - 2/16",
-        route: "Hamburg → Cologne",
-        transport: "ICE or IC",
-        duration: "약 4시간",
-        description: "귀국 전 마지막 여정입니다. 쾰른 대성당 바로 앞 역에 도착합니다. 시간이 넉넉하다면 IC(완행급 급행)를 타고 라인강변을 따라갈 수도 있습니다.",
-        tip: "Travel Tip: 쾰른 역에 내리자마자 보이는 대성당의 압도적인 뷰를 놓치지 마세요. 짐 보관소는 1층에 있습니다.",
-        link: "https://bahn.com",
+        period: "2/14 (토) - 2/16 (월)",
+        route: "Hamburg → Dusseldorf",
+        transport: "FlixTrain FLX20",
+        duration: "08:50 - 12:30",
+        description: "함부르크 중앙역 출발, 뒤셀도르프 중앙역 도착. 기차 여행입니다.",
+        tip: "예약 번호: 332 402 6999 | 중앙역 승강장 확인",
+        link: "https://flixtrain.com",
         recommended: false,
+    },
+    {
+        id: "leg6",
+        period: "2/16 (월) - 귀국",
+        route: "Dusseldorf → Cologne → FRA",
+        transport: "ICE 513 / ICE",
+        duration: "07:26 - 18:00 (귀국)",
+        description: "뒤셀도르프 → 쾰른(관광) → 프랑크푸르트 공항 → 인천 귀국 일정입니다.",
+        tip: "쾰른행 예약: 928207388650 | 공항행 예약: 483759370948",
+        link: "https://bahn.com",
+        recommended: true,
     },
 ];
 
@@ -69,6 +84,47 @@ interface Props {
 
 export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
     const activeSegment = itinerarySegments.find((seg) => seg.id === activeTab);
+
+    // Ticket Logic
+    const [tickets, setTickets] = useState<{ [key: string]: string }>({});
+    const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+    const [uploadingTicket, setUploadingTicket] = useState(false);
+
+    useEffect(() => {
+        const q = query(collection(db, "itinerary_tickets"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const ticketMap: { [key: string]: string } = {};
+            snapshot.docs.forEach(doc => {
+                ticketMap[doc.id] = doc.data().imageUrl;
+            });
+            setTickets(ticketMap);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    const handleTicketUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files?.[0] || !activeSegment) return;
+        const file = e.target.files[0];
+        setUploadingTicket(true);
+
+        try {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = async () => {
+                const base64 = reader.result as string;
+                await setDoc(doc(db, "itinerary_tickets", activeSegment.id), {
+                    imageUrl: base64,
+                    updatedAt: new Date().toISOString()
+                });
+                setUploadingTicket(false);
+            };
+        } catch (error) {
+            console.error("Ticket upload failed", error);
+            setUploadingTicket(false);
+        }
+    };
+
+    const activeTicket = activeSegment ? tickets[activeSegment.id] : null;
 
     return (
         <div className="w-full max-w-4xl mx-auto py-8">
@@ -137,16 +193,12 @@ export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
                                 <div className="flex items-center gap-6 text-gray-600 font-medium">
                                     <div className="flex items-center gap-2">
                                         {/* Train Icon */}
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                                        </svg>
+                                        <Train className="w-5 h-5" />
                                         <span>{activeSegment.transport}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {/* Clock Icon */}
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
+                                        <Clock className="w-5 h-5" />
                                         <span>{activeSegment.duration}</span>
                                     </div>
                                 </div>
@@ -172,34 +224,99 @@ export default function ItineraryTabs({ activeTab, onTabChange }: Props) {
                                     </div>
                                 </div>
 
-                                {/* Action Link */}
-                                <a
-                                    href={activeSegment.link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 text-blue-600 font-bold hover:text-blue-700 transition-colors"
-                                >
-                                    <span>DB/예매 사이트에서 시간표 확인하기</span>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                </a>
+                                {/* Action Buttons */}
+                                <div className="flex flex-wrap gap-3">
+                                    <button
+                                        onClick={() => setIsTicketModalOpen(true)}
+                                        className="flex-1 min-w-[140px] flex items-center justify-center gap-2 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-black transition-colors"
+                                    >
+                                        <QrCode size={18} />
+                                        {activeTicket ? "티켓/QR 확인" : "티켓 등록"}
+                                    </button>
+
+                                    <a
+                                        href={activeSegment.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 min-w-[140px] flex items-center justify-center gap-2 border border-gray-200 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors"
+                                    >
+                                        <span>예매 사이트</span>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        </svg>
+                                    </a>
+                                </div>
                             </div>
 
-                            {/* Right Column: Visual Placeholder */}
+                            {/* Right Column: Visual Placeholder or Ticket Preview */}
                             <div className="hidden md:block h-auto">
-                                <div className="bg-slate-200 rounded-xl h-full min-h-[300px] w-full flex items-center justify-center relative overflow-hidden group">
-                                    <div className="text-center text-gray-400">
-                                        <svg className="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0121 18.382V7.618a1 1 0 01-1.447-.894L15 7m0 13V7" />
-                                        </svg>
-                                    </div>
+                                <div
+                                    onClick={() => setIsTicketModalOpen(true)}
+                                    className="bg-slate-100 rounded-xl h-full min-h-[300px] w-full flex items-center justify-center relative overflow-hidden group border border-slate-200 cursor-pointer hover:border-slate-300 transition-colors"
+                                >
+                                    {activeTicket ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={activeTicket} alt="Ticket" className="w-full h-full object-contain p-4" />
+                                    ) : (
+                                        <div className="text-center text-gray-400">
+                                            <Ticket className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                                            <span className="text-sm font-medium">티켓이 없습니다<br />클릭하여 등록</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </motion.div>
                     )}
                 </AnimatePresence>
             </div>
+
+            {/* Ticket Modal */}
+            <AnimatePresence>
+                {isTicketModalOpen && activeSegment && (
+                    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl overflow-hidden"
+                        >
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-lg font-bold flex items-center gap-2">
+                                    <Ticket size={20} />
+                                    티켓 & QR
+                                </h3>
+                                <button onClick={() => setIsTicketModalOpen(false)} className="bg-gray-100 p-2 rounded-full hover:bg-gray-200"><X size={20} /></button>
+                            </div>
+
+                            <div className="bg-slate-100 rounded-2xl min-h-[300px] flex items-center justify-center mb-6 overflow-hidden relative border border-slate-200">
+                                {activeTicket ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={activeTicket} alt="Ticket" className="w-full h-full object-contain" />
+                                ) : (
+                                    <div className="text-center text-gray-400 p-8">
+                                        <QrCode className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                                        <p className="text-sm font-medium leading-relaxed">
+                                            티켓 이미지나 QR코드를<br />여기에 등록해두세요.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {uploadingTicket && (
+                                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                                        <Loader2 className="animate-spin text-slate-900" size={32} />
+                                    </div>
+                                )}
+                            </div>
+
+                            <label className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 cursor-pointer hover:bg-black transition-colors">
+                                <Upload size={18} />
+                                {activeTicket ? "티켓 이미지 변경" : "티켓 이미지 업로드"}
+                                <input type="file" accept="image/*" className="hidden" onChange={handleTicketUpload} />
+                            </label>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
