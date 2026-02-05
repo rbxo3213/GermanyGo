@@ -61,6 +61,45 @@ const createClusterCustomIcon = function (cluster: any) {
     });
 };
 
+const createLiveUserIcon = (nickname: string, color: string) => {
+    const initial = nickname ? nickname.charAt(0).toUpperCase() : "?";
+    return L.divIcon({
+        className: 'custom-live-user-marker',
+        html: `<div style="
+            width: 40px; 
+            height: 40px; 
+            background-color: ${color}; 
+            border: 3px solid white; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-weight: 900; 
+            font-size: 18px; 
+            color: white; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            transition: transform 0.3s ease;
+        ">
+            ${initial}
+        </div>
+        <div style="
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 8px;
+            height: 8px;
+            background-color: white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        "></div>
+        `,
+        iconSize: [40, 40],
+        iconAnchor: [20, 42], // Centered bottom with slight offset for the 'pointer' dot
+        popupAnchor: [0, -45]
+    });
+};
+
 interface Footprint {
     id: string;
     lat: number;
@@ -75,11 +114,22 @@ interface Footprint {
 // Map Controller
 function MapController({ coords, trigger }: { coords: [number, number] | null, trigger: number }) {
     const map = useMap();
+    const isFirst = useRef(true);
+
+    // 1. First Load: Set View Instantly
     useEffect(() => {
-        if (coords) {
-            map.flyTo(coords, 16, { duration: 1.2 }); // Zoom level increased to 16
+        if (coords && isFirst.current) {
+            map.setView(coords, 16);
+            isFirst.current = false;
         }
-    }, [coords, map, trigger]);
+    }, [coords, map]);
+
+    // 2. Manual Trigger: Fly To
+    useEffect(() => {
+        if (coords && trigger > 0) {
+            map.flyTo(coords, 16, { duration: 1.2 });
+        }
+    }, [trigger]); // Only run on trigger change
     return null;
 }
 
@@ -101,56 +151,150 @@ export default function LBSDiscovery() {
     const [takenFlags, setTakenFlags] = useState<string[]>([]);
     const [pendingFlag, setPendingFlag] = useState<string | null>(null);
 
+    // ... types
+    interface UserLocation {
+        uid: string;
+        lat: number;
+        lng: number;
+        nickname: string;
+        flag: string;
+        updatedAt: Timestamp;
+    }
+
+
+    // Live Location State
+    const [liveLocations, setLiveLocations] = useState<UserLocation[]>([]);
+    const lastUploadTimeRef = useRef<number>(0);
+    const lastSummaryPosRef = useRef<[number, number] | null>(null);
+    const watchIdRef = useRef<number | null>(null);
+
+    // Helper: Calculate Distance (Haversine) - in meters
+    const getDistanceFromLatLonInM = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 6371; // Radius of the earth in km
+        const dLat = (lat2 - lat1) * (Math.PI / 180);
+        const dLon = (lon2 - lon1) * (Math.PI / 180);
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c * 1000; // Distance in meters
+    };
+
     // 1. Initial Load & GPS
     useEffect(() => {
         if (!user) return;
 
-        // Force High Accuracy GPS
-        const getExactLocation = () => {
-            if (!navigator.geolocation) {
-                alert("GPS를 지원하지 않는 브라우저입니다.");
-                setLoading(false);
-                return;
-            }
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    setPosition([pos.coords.latitude, pos.coords.longitude]);
+        const startWatching = () => {
+            if (watchIdRef.current) return; // Already watching
+
+            watchIdRef.current = navigator.geolocation.watchPosition(
+                async (pos) => {
+                    const { latitude, longitude } = pos.coords;
+                    setPosition([latitude, longitude]);
                     setLoading(false);
+
+                    // --- Adaptive Throttling Logic ---
+                    const now = Date.now();
+                    const timeElapsed = now - lastUploadTimeRef.current;
+                    const minInterval = 10000; // 10 seconds
+
+                    let distanceMoved = 100; // Default to trigger first write
+                    if (lastSummaryPosRef.current) {
+                        distanceMoved = getDistanceFromLatLonInM(
+                            lastSummaryPosRef.current[0], lastSummaryPosRef.current[1],
+                            latitude, longitude
+                        );
+                    }
+
+                    // Condition: Time > 10s AND Distance > 15m
+                    if (timeElapsed > minInterval && distanceMoved > 15) {
+                        // Write to Firestore 'user_locations'
+                        if (userProfile && myFlag) {
+                            try {
+                                const docRef = doc(db, "user_locations", user.uid);
+                                await import("firebase/firestore").then(({ setDoc, serverTimestamp }) => {
+                                    setDoc(docRef, {
+                                        uid: user.uid,
+                                        lat: latitude,
+                                        lng: longitude,
+                                        nickname: userProfile.nickname || "여행자",
+                                        flag: myFlag,
+                                        updatedAt: serverTimestamp()
+                                    }, { merge: true });
+                                });
+                                lastUploadTimeRef.current = now;
+                                lastSummaryPosRef.current = [latitude, longitude];
+                                console.log(`[LBS] Location Updated: ${latitude}, ${longitude}`);
+                            } catch (e) {
+                                console.error("[LBS] Update Failed", e);
+                            }
+                        }
+                    }
                 },
                 (err) => {
-                    console.error("GPS Error:", err);
-                    alert("위치 정보를 가져올 수 없습니다. 권한을 확인해주세요.");
-                    // Fallback to Berlin
-                    setPosition([52.5200, 13.4050]);
-                    setLoading(false);
+                    console.error("GPS Watch Error:", err);
+                    if (err.code === 1) alert("위치 권한이 거부되었습니다.");
                 },
                 {
-                    enableHighAccuracy: true, // 중요: 정확도 우선
-                    timeout: 10000,
-                    maximumAge: 0
+                    enableHighAccuracy: true,
+                    timeout: 20000,
+                    maximumAge: 10000
                 }
             );
         };
 
-        getExactLocation();
+        const stopWatching = () => {
+            if (watchIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchIdRef.current);
+                watchIdRef.current = null;
+            }
+        };
 
-        // Flag Check
-        if (userProfile && userProfile.flag) {
-            setMyFlag(userProfile.flag);
-        } else {
-            const checkUserFlag = async () => {
-                const userRef = doc(db, "users", user.uid);
-                const snap = await getDoc(userRef);
-                if (snap.exists() && snap.data().flag) {
-                    setMyFlag(snap.data().flag);
-                } else {
-                    await fetchTakenFlags();
-                    setIsFlagSelectionOpen(true);
-                }
-            };
-            checkUserFlag();
-        }
-    }, [user, userProfile]);
+        // Initial Start
+        startWatching();
+
+        // Background Suppression
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                stopWatching();
+                console.log("[LBS] Tab Hidden -> GPS Stopped");
+            } else {
+                startWatching();
+                console.log("[LBS] Tab Visible -> GPS Resumed");
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        // Cleanup
+        return () => {
+            stopWatching();
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+        };
+
+        // Flag Check Logic (Merged into useEffect dependency chain if needed, but keeping separate is clearer for logic separation, 
+        // however for `myFlag` dependency in watchPosition, we need to be careful. 
+        // Current implementation re-runs effect on `myFlag` change which is acceptable.)
+    }, [user, userProfile, myFlag]);
+
+    // Separate Effect for Check Flag (refactored from previous code to avoid complex deps)
+    useEffect(() => {
+        if (!user || myFlag) return;
+
+        const checkUserFlag = async () => {
+            // ... existing flag check logic
+            const userRef = doc(db, "users", user.uid);
+            const snap = await getDoc(userRef);
+            if (snap.exists() && snap.data().flag) {
+                setMyFlag(snap.data().flag);
+            } else {
+                await fetchTakenFlags();
+                setIsFlagSelectionOpen(true);
+            }
+        };
+        checkUserFlag();
+    }, [user]);
 
     const fetchTakenFlags = async () => {
         const q = query(collection(db, "users"));
@@ -166,6 +310,25 @@ export default function LBSDiscovery() {
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const prints = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Footprint[];
             setFootprints(prints);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    // 3. Load Live Locations (New)
+    useEffect(() => {
+        // We fetch all and filter client side for 'last 30 mins' to keep it simple or use complex query
+        // Using client-side filter for simplicity with small user base
+        const q = query(collection(db, "user_locations"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const now = Date.now();
+            const activeUsers = snapshot.docs
+                .map(doc => doc.data() as UserLocation)
+                .filter(loc => {
+                    if (!loc.updatedAt) return false;
+                    const diff = now - loc.updatedAt.toMillis();
+                    return diff < 30 * 60 * 1000; // 30 minutes
+                });
+            setLiveLocations(activeUsers);
         });
         return () => unsubscribe();
     }, []);
@@ -244,6 +407,7 @@ export default function LBSDiscovery() {
                     spiderfyOnMaxZoom={true}
                     showCoverageOnHover={false}
                 >
+                    {/* Footprints of messages */}
                     {displayedFootprints.map((fp) => (
                         <Marker key={fp.id} position={[fp.lat, fp.lng]} icon={createFlagIcon(fp.flag || "#000")}>
                             <Popup className="custom-popup" closeButton={false} maxWidth={200}>
@@ -282,6 +446,27 @@ export default function LBSDiscovery() {
                             </Popup>
                         </Marker>
                     ))}
+
+                    {/* Live Users */}
+                    {liveLocations.map(loc => (
+                        <Marker
+                            key={`live-${loc.uid}`}
+                            position={[loc.lat, loc.lng]}
+                            icon={createLiveUserIcon(loc.nickname, loc.flag)}
+                            zIndexOffset={100} // Ensure live users are on top
+                        >
+                            <Popup closeButton={false} className="custom-popup" maxWidth={150}>
+                                <div className="text-center p-2">
+                                    <div className="font-black text-sm text-slate-900 mb-1">{loc.nickname}</div>
+                                    <div className="text-[10px] text-gray-400 font-bold bg-gray-50 rounded-full px-2 py-0.5 inline-block">
+                                        실시간 여행 중
+                                    </div>
+                                </div>
+                            </Popup>
+                        </Marker>
+                    ))}
+
+
                 </MarkerClusterGroup>
             </MapContainer>
 

@@ -25,8 +25,8 @@ const withPWA = require("@ducanh2912/next-pwa").default({
                 options: {
                     cacheName: 'static-image-assets',
                     expiration: {
-                        maxEntries: 64,
-                        maxAgeSeconds: 24 * 60 * 60, // 24 Hours
+                        maxEntries: 100, // Increased entries
+                        maxAgeSeconds: 7 * 24 * 60 * 60, // 7 Days (Data Saving)
                     },
                 },
             },
@@ -35,9 +35,21 @@ const withPWA = require("@ducanh2912/next-pwa").default({
                 handler: 'NetworkFirst',
                 options: {
                     cacheName: 'weather-api',
+                    networkTimeoutSeconds: 5, // Fallback quickly if slow
                     expiration: {
                         maxEntries: 16,
                         maxAgeSeconds: 60 * 60, // 1 Hour
+                    },
+                },
+            },
+            {
+                urlPattern: /^https:\/\/dapi\.kakao\.com\/.*/i,
+                handler: 'StaleWhileRevalidate',
+                options: {
+                    cacheName: 'kakao-api',
+                    expiration: {
+                        maxEntries: 32,
+                        maxAgeSeconds: 24 * 60 * 60, // 24 Hours
                     },
                 },
             },

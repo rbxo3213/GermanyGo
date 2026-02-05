@@ -66,8 +66,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const unsubscribe = onSnapshot(q, (snap) => {
             let list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as NotificationItem[];
 
-            // Client-side filter for deletedBy
-            list = list.filter(item => !item.deletedBy?.includes(user.uid));
+            // Client-side filter: Hide items deleted OR read by user
+            list = list.filter(item =>
+                !item.deletedBy?.includes(user.uid) &&
+                !item.readBy?.includes(user.uid)
+            );
 
             setNotifications(list);
 
